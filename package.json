@@ -1,0 +1,15 @@
+{
+  "name": "ansa-integration-disney-park-challenge-practice",
+  "version": "1.0.0",
+  "description": "A zero-dependency Notion-embeddable Kahoot-style multiplayer quiz game for AnSa Integration Disney Park Challenge Practice.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
