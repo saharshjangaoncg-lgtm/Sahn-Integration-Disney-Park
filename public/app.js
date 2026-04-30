@@ -170,14 +170,15 @@ function renderJoin() {
 
 function renderLobby() {
   const players = state.room.players.map(playerRow).join("") || `<p class="muted">Waiting for players...</p>`;
+  const isHost = state.role === "host";
   return shell(`
     <section class="lobby">
       <div class="panel">
-        <p class="muted">Share this code with players</p>
+        <p class="muted">${isHost ? "Share this code with players" : "You are in the park"}</p>
         <div class="room-code">${escapeHtml(state.room.code)}</div>
-        <p class="notice">In Notion, paste your hosted app link with /embed. Players can also open the same link in a browser.</p>
+        <p class="notice">${isHost ? "Players enter this room code from the same website link. Start when everyone is listed." : "You joined successfully. Stay on this screen until the host starts the first mission."}</p>
         <div class="actions" style="margin-top: 18px;">
-          ${state.role === "host" ? `<button class="btn gold" data-action="start">Start Game</button>` : `<span class="badge">Waiting for host</span>`}
+          ${isHost ? `<button class="btn gold" data-action="start">Start Game</button>` : `<span class="badge">Waiting for host</span>`}
         </div>
         ${lessonStats()}
       </div>
@@ -426,6 +427,7 @@ app.addEventListener("click", async (event) => {
   if (action === "host") {
     const reply = await api("/api/host/create", { hostName: "Teacher" });
     if (reply.ok) {
+      state.view = "room";
       state.deck = reply.deck;
       state.room = reply.room;
       state.role = "host";
@@ -455,6 +457,7 @@ app.addEventListener("submit", async (event) => {
     roomCode: data.get("roomCode")
   });
   if (reply.ok) {
+    state.view = "room";
     state.deck = reply.deck;
     state.room = reply.room;
     state.role = "player";
