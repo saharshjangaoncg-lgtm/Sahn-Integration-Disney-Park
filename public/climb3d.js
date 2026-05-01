@@ -10,6 +10,63 @@ export const avatarOptions = [
   { id: "vtl", name: "VTL Vector", short: "V", color: "#14b8a6", glow: "#ccfbf1" }
 ];
 
+export const courseThemes = {
+  castle: {
+    name: "Castle Course",
+    background: 0x202329,
+    fog: 0x202329,
+    base: 0x3a404a,
+    rail: 0xf6d24a,
+    accent: 0x7b5aa6,
+    obstacle: "spires"
+  },
+  mickey: {
+    name: "Mickey Clubhouse Climb",
+    background: 0x211f22,
+    fog: 0x211f22,
+    base: 0xe63946,
+    rail: 0xf6d24a,
+    accent: 0x0f172a,
+    obstacle: "clubhouse"
+  },
+  minnie: {
+    name: "Minnie Bow Bounce",
+    background: 0x2d222d,
+    fog: 0x2d222d,
+    base: 0xd86aa7,
+    rail: 0xffd6ea,
+    accent: 0xff8ac6,
+    obstacle: "bows"
+  },
+  donald: {
+    name: "Donald Dock Framework",
+    background: 0x1c2733,
+    fog: 0x1c2733,
+    base: 0x2563eb,
+    rail: 0xfef08a,
+    accent: 0xffffff,
+    obstacle: "dock"
+  },
+  goofy: {
+    name: "Goofy Tree Parkour",
+    background: 0x1f281f,
+    fog: 0x1f281f,
+    base: 0x7a4a25,
+    rail: 0x5fa470,
+    accent: 0x2f6d3a,
+    obstacle: "trees"
+  },
+  quiz: {
+    name: "Quiz Quest Mix",
+    background: 0x252336,
+    fog: 0x252336,
+    base: 0xf39b4a,
+    rail: 0x168bd3,
+    accent: 0x8b5cf6,
+    obstacle: "mixed"
+  }
+};
+
 const scenes = new WeakMap();
 let threeModulePromise = null;
 
@@ -17,7 +74,7 @@ export function getAvatar(id) {
   return avatarOptions.find((avatar) => avatar.id === id) || avatarOptions[0];
 }
 
-export function renderClimbScene(container, climbers) {
+export function renderClimbScene(container, climbers, courseId = "castle") {
   if (!container) return;
   const safeClimbers = normalizeClimbers(climbers);
   if (!threeModulePromise) {
@@ -28,7 +85,7 @@ export function renderClimbScene(container, climbers) {
     .then((THREE) => {
       const scene = scenes.get(container) || createScene(THREE, container);
       scenes.set(container, scene);
-      scene.update(safeClimbers);
+      scene.update(safeClimbers, courseId);
     })
     .catch(() => renderFallback(container, safeClimbers));
 }
@@ -42,6 +99,7 @@ function normalizeClimbers(climbers) {
       avatar: player.avatar || avatarOptions[index % avatarOptions.length].id,
       score: Number(player.score || 0),
       height: Math.max(0, Number(player.height || 0)),
+      direction: Number(player.direction || 0),
       answered: Boolean(player.answered)
     }))
     .sort((a, b) => b.height - a.height || b.score - a.score)
@@ -75,44 +133,113 @@ function createScene(THREE, container) {
   scene.add(key);
 
   const loopFeet = 900;
-  const platformCount = 52;
+  const platformCount = 58;
   const radius = 3.25;
   const levelGap = 0.52;
-  const baseMaterial = new THREE.MeshStandardMaterial({
-    color: 0x3a404a,
-    metalness: 0.12,
-    roughness: 0.76
-  });
-  const railMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf6d24a,
-    emissive: 0x2a2100,
-    metalness: 0.2,
-    roughness: 0.5
-  });
+  let activeCourse = "";
 
-  for (let i = 0; i < platformCount; i += 1) {
-    const angle = i * 0.64;
-    const y = i * levelGap - 2.4;
-    const platform = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.13, 0.68), i % 5 === 0 ? railMaterial : baseMaterial);
-    platform.position.set(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
-    platform.rotation.y = -angle;
-    tower.add(platform);
-
-    if (i % 4 === 0) {
-      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.1, 10), railMaterial);
-      rail.position.set(Math.cos(angle) * (radius - 0.78), y + 0.42, Math.sin(angle) * (radius - 0.78));
-      rail.rotation.z = Math.PI / 2;
-      rail.rotation.y = -angle;
-      tower.add(rail);
-    }
+  function material(color, options = {}) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      emissive: options.emissive ?? 0x000000,
+      metalness: options.metalness ?? 0.14,
+      roughness: options.roughness ?? 0.72
+    });
   }
 
-  const core = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.22, platformCount * levelGap + 2, 18),
-    new THREE.MeshStandardMaterial({ color: 0x5c4dd9, emissive: 0x171136, roughness: 0.7 })
-  );
-  core.position.y = platformCount * levelGap * 0.5 - 2.4;
-  tower.add(core);
+  function buildCourse(courseId) {
+    const theme = courseThemes[courseId] || courseThemes.castle;
+    activeCourse = courseId;
+    tower.clear();
+    scene.background = new THREE.Color(theme.background);
+    scene.fog = new THREE.Fog(theme.fog, 13, 36);
+
+    const baseMaterial = material(theme.base);
+    const railMaterial = material(theme.rail, { emissive: theme.rail, roughness: 0.5 });
+    const accentMaterial = material(theme.accent, { emissive: theme.accent, roughness: 0.62 });
+
+    for (let i = 0; i < platformCount; i += 1) {
+      const bend = Math.sin(i * 0.37) * 0.28;
+      const angle = i * 0.64 + bend;
+      const y = i * levelGap - 2.4;
+      const width = theme.obstacle === "trees" ? 1.35 : theme.obstacle === "dock" ? 1.55 : 1.82;
+      const depth = theme.obstacle === "clubhouse" ? 0.82 : 0.66;
+      const platform = new THREE.Mesh(new THREE.BoxGeometry(width, 0.13, depth), i % 5 === 0 ? railMaterial : baseMaterial);
+      platform.position.set(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+      platform.rotation.y = -angle + (i % 7 === 0 ? 0.32 : 0);
+      tower.add(platform);
+
+      if (i % 4 === 0) {
+        const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.16, 10), railMaterial);
+        rail.position.set(Math.cos(angle) * (radius - 0.8), y + 0.42, Math.sin(angle) * (radius - 0.8));
+        rail.rotation.z = Math.PI / 2;
+        rail.rotation.y = -angle;
+        tower.add(rail);
+      }
+
+      if (i % 6 === 2) {
+        addObstacle(theme, accentMaterial, railMaterial, angle, y + 0.42, i);
+      }
+    }
+
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.22, platformCount * levelGap + 2, 18),
+      material(theme.accent, { emissive: theme.accent, roughness: 0.7 })
+    );
+    core.position.y = platformCount * levelGap * 0.5 - 2.4;
+    tower.add(core);
+  }
+
+  function addObstacle(theme, accentMaterial, railMaterial, angle, y, index) {
+    const group = new THREE.Group();
+    const lane = radius + 0.12;
+    group.position.set(Math.cos(angle) * lane, y, Math.sin(angle) * lane);
+    group.rotation.y = -angle;
+
+    const type = theme.obstacle === "mixed"
+      ? ["spires", "clubhouse", "bows", "dock", "trees"][index % 5]
+      : theme.obstacle;
+
+    if (type === "spires") {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.74, 5), accentMaterial);
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.34, 8), railMaterial);
+      cone.position.y = 0.46;
+      base.position.y = 0.08;
+      group.add(base, cone);
+    } else if (type === "clubhouse") {
+      const block = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), accentMaterial);
+      const earA = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), railMaterial);
+      const earB = earA.clone();
+      earA.position.set(-0.22, 0.42, 0.02);
+      earB.position.set(0.22, 0.42, 0.02);
+      group.add(block, earA, earB);
+    } else if (type === "bows") {
+      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), railMaterial);
+      const left = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.42, 4), accentMaterial);
+      const right = left.clone();
+      left.rotation.z = Math.PI / 2;
+      right.rotation.z = -Math.PI / 2;
+      left.position.x = -0.24;
+      right.position.x = 0.24;
+      group.add(left, knot, right);
+    } else if (type === "dock") {
+      for (let plank = 0; plank < 3; plank += 1) {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.62, 0.18), plank % 2 ? railMaterial : accentMaterial);
+        board.position.x = (plank - 1) * 0.18;
+        board.rotation.z = (plank - 1) * 0.35;
+        group.add(board);
+      }
+    } else if (type === "trees") {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.74, 10), accentMaterial);
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.64, 10), railMaterial);
+      top.position.y = 0.58;
+      group.add(trunk, top);
+    }
+
+    tower.add(group);
+  }
+
+  buildCourse("castle");
 
   const labelLayer = document.createElement("div");
   labelLayer.className = "climb-label-layer";
@@ -152,8 +279,9 @@ function createScene(THREE, container) {
     return group;
   }
 
-  function update(climbers) {
+  function update(climbers, courseId = "castle") {
     size();
+    if (courseId !== activeCourse) buildCourse(courseId);
     const active = new Set();
     const leaderHeight = Math.max(120, ...climbers.map((player) => player.height));
     camera.position.y = 4.2 + (leaderHeight % loopFeet) / 55;
@@ -163,9 +291,9 @@ function createScene(THREE, container) {
       const mesh = playerMeshes.get(player.id) || makeClimber(player);
       playerMeshes.set(player.id, mesh);
       const loopHeight = player.height % loopFeet;
-      const angle = loopHeight / 72 + index * 0.58;
+      const angle = loopHeight / 72 + (player.direction || 0) * 0.55 + index * 0.32;
       const y = loopHeight / 38 - 1.8;
-      const lane = radius - 0.35 + (index % 3) * 0.32;
+      const lane = radius - 0.45 + (Math.abs(player.direction || index) % 4) * 0.23;
       mesh.position.set(Math.cos(angle) * lane, y, Math.sin(angle) * lane);
       mesh.rotation.y = -angle + Math.PI / 2;
       mesh.userData.targetHeight = player.height;

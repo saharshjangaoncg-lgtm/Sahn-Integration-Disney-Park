@@ -13,6 +13,8 @@ const HOST = process.env.HOST || "0.0.0.0";
 
 const rooms = new Map();
 const subscribers = new Map();
+const CLIMB_COST = 300;
+const CLIMB_HEIGHT = 24;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -26,6 +28,7 @@ const mimeTypes = {
 };
 
 const avatarIds = new Set(["mickey", "minnie", "donald", "goofy", "anikshaa", "joy", "saharsh", "divyam", "vtl"]);
+const parkThemeIds = new Set(["castle", "mickey", "minnie", "donald", "goofy", "quiz"]);
 
 function sendJson(res, status, body) {
   res.writeHead(status, {
@@ -82,8 +85,16 @@ function sanitizeAvatar(avatar) {
   return avatarIds.has(normalized) ? normalized : "mickey";
 }
 
-function heightFromPoints(points) {
-  return Math.max(0, Math.round(points / 22));
+function sanitizeParkTheme(theme) {
+  const normalized = String(theme || "").toLowerCase();
+  return parkThemeIds.has(normalized) ? normalized : "castle";
+}
+
+function sanitizeTurn(turn) {
+  const normalized = String(turn || "straight").toLowerCase();
+  if (normalized === "left") return -1;
+  if (normalized === "right") return 1;
+  return 0;
 }
 
 function playerQuestion(question, includeChoices) {
@@ -118,12 +129,17 @@ function publicRoom(room) {
     currentQuestionIndex: room.currentQuestionIndex,
     totalQuestions: lessonDeck.questions.length,
     questionStartedAt: room.questionStartedAt,
+    parkTheme: room.parkTheme || "castle",
+    climbCost: CLIMB_COST,
+    climbHeight: CLIMB_HEIGHT,
     players: [...room.players.values()].map((player) => ({
       id: player.id,
       name: player.name,
       score: player.score,
       height: player.height ?? 0,
       avatar: player.avatar || "mickey",
+      direction: player.direction ?? 0,
+      lastClimbAt: player.lastClimbAt || null,
       streak: player.streak,
       answered: Boolean(room.answers.get(player.id)),
       frozenNext: player.frozenQuestionIndex === room.currentQuestionIndex + 1 || player.frozenQuestionIndex === room.currentQuestionIndex,
@@ -166,9 +182,9 @@ function computeResults(room) {
     let speedBonus = 0;
     let streakBonus = 0;
     let badgeBonus = 0;
-    let heightGain = 0;
     let frozenPenalty = false;
     player.height ??= 0;
+    player.direction ??= 0;
 
     if (isCorrect) {
       const maxMs = question.timeLimitSeconds * 1000;
@@ -180,8 +196,6 @@ function computeResults(room) {
       badgeBonus = player.streak >= 3 ? bonusPoints : 0;
       pointsAwarded = basePoints + speedBonus + streakBonus + badgeBonus;
       player.score += pointsAwarded;
-      heightGain = heightFromPoints(pointsAwarded);
-      player.height += heightGain;
     } else {
       player.streak = 0;
     }
@@ -200,9 +214,10 @@ function computeResults(room) {
       score: player.score,
       height: player.height ?? 0,
       avatar: player.avatar || "mickey",
+      direction: player.direction ?? 0,
       streak: player.streak,
       pointsAwarded,
-      heightGain,
+      climbsAvailable: Math.floor(player.score / CLIMB_COST),
       speedBonus,
       streakBonus,
       badgeBonus,
@@ -248,7 +263,14 @@ function syncLastResultScores(room) {
   const playersById = new Map(room.players);
   room.lastResults.playerResults = room.lastResults.playerResults.map((result) => {
     const player = playersById.get(result.id);
-    return player ? { ...result, score: player.score, height: player.height, streak: player.streak } : result;
+    return player ? {
+      ...result,
+      score: player.score,
+      height: player.height,
+      direction: player.direction ?? 0,
+      streak: player.streak,
+      climbsAvailable: Math.floor(player.score / CLIMB_COST)
+    } : result;
   });
   room.lastResults.playerResults.sort((a, b) => b.height - a.height || b.score - a.score);
   room.lastResults.powerLog = (room.actionLog || []).slice(-6);
@@ -282,9 +304,7 @@ function usePlayerPower(room, playerId, power) {
     if (amount <= 0) throw new Error("That rival has no points to steal.");
     topRival.score -= amount;
     actor.score += amount;
-    const climb = heightFromPoints(amount);
-    actor.height += climb;
-    room.actionLog.push(`${actor.name} stole ${amount} points from ${topRival.name} and climbed ${climb} ft.`);
+    room.actionLog.push(`${actor.name} stole ${amount} climb-bank points from ${topRival.name}.`);
   } else if (normalizedPower === "freeze") {
     if (actor.streak < 4) throw new Error("Freeze unlocks at a 4-question streak.");
     topRival.frozenQuestionIndex = room.currentQuestionIndex + 1;
@@ -300,14 +320,33 @@ function usePlayerPower(room, playerId, power) {
       totalDrained += drained;
     }
     actor.score += totalDrained;
-    const climb = heightFromPoints(totalDrained);
-    actor.height += climb;
-    room.actionLog.push(`${actor.name} nuked the leaderboard, absorbed ${totalDrained} points, and climbed ${climb} ft.`);
+    room.actionLog.push(`${actor.name} nuked the leaderboard and absorbed ${totalDrained} climb-bank points.`);
   } else {
     throw new Error("Unknown power move.");
   }
 
   actor.powerUsedQuestion = room.currentQuestionIndex;
+  syncLastResultScores(room);
+  publish(room);
+}
+
+function useClimb(room, playerId, turn) {
+  if (room.status === "answering") {
+    throw new Error("Answer the current question first, then spend points to climb on the reveal screen.");
+  }
+  const player = room.players.get(playerId);
+  if (!player) throw new Error("Player session not recognized.");
+  if (player.score < CLIMB_COST) {
+    throw new Error(`You need ${CLIMB_COST} points to climb. Answer more questions to refill your point bank.`);
+  }
+
+  const turnValue = sanitizeTurn(turn);
+  player.score -= CLIMB_COST;
+  player.height = (player.height || 0) + CLIMB_HEIGHT;
+  player.direction = (player.direction || 0) + turnValue;
+  player.lastClimbAt = Date.now();
+  const turnLabel = turnValue < 0 ? "left" : turnValue > 0 ? "right" : "forward";
+  room.actionLog.push(`${player.name} spent ${CLIMB_COST} points, turned ${turnLabel}, and climbed ${CLIMB_HEIGHT} ft.`);
   syncLastResultScores(room);
   publish(room);
 }
@@ -384,6 +423,7 @@ async function handleApi(req, res) {
         code,
         hostSecret,
         hostName: sanitizeName(body.hostName || "Teacher"),
+        parkTheme: sanitizeParkTheme(body.parkTheme),
         status: "lobby",
         currentQuestionIndex: 0,
         questionStartedAt: null,
@@ -408,6 +448,8 @@ async function handleApi(req, res) {
         avatar: sanitizeAvatar(body.avatar),
         score: 0,
         height: 0,
+        direction: 0,
+        lastClimbAt: null,
         streak: 0,
         frozenQuestionIndex: null,
         powerUsedQuestion: -1
@@ -467,6 +509,13 @@ async function handleApi(req, res) {
     if (route === "/api/player/power") {
       const room = requireRoom(body.roomCode);
       usePlayerPower(room, body.playerId, body.power);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (route === "/api/player/climb") {
+      const room = requireRoom(body.roomCode);
+      useClimb(room, body.playerId, body.turn);
       sendJson(res, 200, { ok: true });
       return;
     }

@@ -30,12 +30,12 @@ export const lessonDeck = {
     primaryColor: "#168bd3",
     accentColor: "#ffd166",
     parkCards: [
-      { title: "Magic Motion of BC", icon: "🐭", label: "Games", color: "#168bd3", image: "/assets/characters/donald-card.png" },
-      { title: "Mickey's Math", icon: "🎀", label: "Lessons", color: "#f6d24a", image: "/assets/characters/mickey-card.png" },
-      { title: "Terror Tower of BC", icon: "🦆", label: "HARD", color: "#d65b58", image: "/assets/characters/minnie-card.png" },
-      { title: "Formula Forests", icon: "🐶", label: "Practice", color: "#5fa470", image: "/assets/characters/goofy-card.png" },
-      { title: "Quiz Quest", icon: "🏰", label: "Live", color: "#7b5aa6", image: "/assets/characters/mickey-card.png" },
-      { title: "Reminder Resort", icon: "⭐", label: "Debrief", color: "#f39b4a", image: "/assets/characters/donald-card.png" }
+      { title: "Castle Course", themeId: "castle", icon: "🏰", label: "Castle", color: "#7b5aa6", image: "/assets/characters/castle-cover.png", description: "Stone towers, gold rails, and castle ramparts." },
+      { title: "Mickey Clubhouse Climb", themeId: "mickey", icon: "🐭", label: "Red + Yellow", color: "#e63946", image: "/assets/characters/mickey-card.png", description: "Clubhouse blocks with red, black, and yellow platforms." },
+      { title: "Minnie Bow Bounce", themeId: "minnie", icon: "🎀", label: "Pink", color: "#d86aa7", image: "/assets/characters/minnie-card.png", description: "Pink bow obstacles and ribbon platforms." },
+      { title: "Donald Dock Framework", themeId: "donald", icon: "🦆", label: "Blue Dock", color: "#168bd3", image: "/assets/characters/donald-card.png", description: "Broken dock planks and duck-frame jumps." },
+      { title: "Goofy Tree Parkour", themeId: "goofy", icon: "🐶", label: "Tree Run", color: "#5fa470", image: "/assets/characters/goofy-card.png", description: "Brown tree trunks, green platforms, and forest turns." },
+      { title: "Quiz Quest Mix", themeId: "quiz", icon: "⭐", label: "Mixed", color: "#f39b4a", image: "/assets/characters/donald-card.png", description: "A rotating remix of every park style." }
     ]
   },
   lessonPlan: {
@@ -47,7 +47,7 @@ export const lessonDeck = {
       "Start in lobby mode while students choose avatars and join from the Notion embed or shared link.",
       "Before each question, ask students which method they expect to use and why.",
       "After results, use the worked solution as the mini-lesson.",
-      "Point out how points convert into height on the 3D parkour leaderboard.",
+      "Point out how students spend earned points to climb higher on the 3D parkour leaderboard.",
       "Let students revise one missed problem in their notebooks for recovery credit."
     ],
     studentDeliverable: "Each student records the method, final answer, and one sentence explaining why that method works for at least four questions."

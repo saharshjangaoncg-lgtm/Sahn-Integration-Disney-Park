@@ -39,8 +39,10 @@ The exact URL depends on whether the name is available on the hosting service.
 - 30-question harder Disney-themed AP Calculus BC Unit 6 quiz.
 - Live multiplayer host/player interface.
 - Avatar selection before joining a live room.
-- Base points, speed bonus, streak bonus, power moves, climb height, and final award badges.
-- 3D infinite parkour tower where points become height and the course loops every 900 feet.
+- Clickable park-course selection before hosting.
+- Spendable point bank: answering questions earns points, and players spend points to climb.
+- Base points, speed bonus, streak bonus, power moves, climb height, turns, and final award badges.
+- 3D infinite parkour tower where players choose left, forward, or right climbs and the course loops every 900 feet.
 - Web-based Unit 6 slide lesson page.
 - Editable PowerPoint slide deck:
 
@@ -253,7 +255,7 @@ Use this exact order when presenting:
 
 ## Scoring and power moves
 
-The game has a final leaderboard at the end. The main race is now ranked by climb height first, then points.
+The game has a final leaderboard at the end. The main race is ranked by climb height first, then remaining point bank.
 
 Scoring:
 
@@ -261,16 +263,26 @@ Scoring:
 - Fast correct answer: speed bonus.
 - Consecutive correct answers: streak bonus.
 - Three-question streak: badge bonus.
-- Every 22 points becomes about 1 foot of parkour height.
+- Players spend 300 point-bank points to climb 24 feet.
+- Left, forward, and right climb buttons all spend points and change the player's route through the 3D tower.
 - The 3D tower loops after 900 feet, so a player can keep climbing into Loop 2, Loop 3, and beyond.
 
 Power moves happen on the results screen:
 
-- `Steal`: unlocks at a 3-streak and takes 300 points from the top rival, then converts those points into climb height.
+- `Steal`: unlocks at a 3-streak and takes 300 point-bank points from the top rival.
 - `Freeze`: unlocks at a 4-streak and removes the top rival's speed bonus on the next question.
-- `Nuke`: unlocks at a 5-streak and drains 200 points from each player currently ahead of you, then gives those points and climb height to you.
+- `Nuke`: unlocks at a 5-streak and drains 200 point-bank points from each player currently ahead of you.
 
 Each player can use only one power move per results screen.
+
+Park course themes:
+
+- `Castle Course`: stone towers, gold rails, and castle ramparts.
+- `Mickey Clubhouse Climb`: red, black, and yellow clubhouse blocks.
+- `Minnie Bow Bounce`: pink bow obstacles and ribbon platforms.
+- `Donald Dock Framework`: blue dock planks and duck-frame jumps.
+- `Goofy Tree Parkour`: brown tree trunks and forest platforms.
+- `Quiz Quest Mix`: a rotating remix of every park style.
 
 ## Lesson Plan
 
