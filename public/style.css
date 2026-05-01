@@ -33,7 +33,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -285,6 +286,57 @@ h1 {
 .avatar-dock {
   display: grid;
   gap: 12px;
+}
+
+.avatar-select-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--avatar-color), transparent 72%), rgba(187, 247, 208, 0.14)),
+    rgba(37, 40, 47, 0.9);
+  border: 1px solid color-mix(in srgb, var(--avatar-glow, var(--avatar-color)), transparent 58%);
+}
+
+.avatar-assignment {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-assignment > span {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  color: white;
+  background: var(--avatar-color);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--avatar-glow, var(--avatar-color)), transparent 68%);
+  font-weight: 950;
+}
+
+.avatar-assignment div {
+  display: grid;
+  gap: 3px;
+}
+
+.avatar-assignment strong {
+  color: #fff9d7;
+  font-size: clamp(1.05rem, 2.6vw, 1.45rem);
+}
+
+.avatar-assignment em {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.avatar-select-field {
+  gap: 6px;
 }
 
 .avatar-dropzone {
@@ -730,7 +782,8 @@ h1 {
   font-size: 0.92rem;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 48px;
   border-radius: 8px;
@@ -741,8 +794,14 @@ input {
   outline: none;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--gold);
+}
+
+select option,
+select optgroup {
+  color: #111827;
 }
 
 .room-code {

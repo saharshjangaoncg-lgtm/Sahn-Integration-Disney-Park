@@ -16,7 +16,6 @@ const state = {
   previewRoom: null,
   previewCode: "",
   joinName: "",
-  dragAvatar: "",
   answeredChoiceId: "",
   error: "",
   events: null,
@@ -148,6 +147,16 @@ function claimedAvatarIds(room = state.room || state.previewRoom) {
     .map((player) => player.avatar));
 }
 
+function firstAvailableAvatar(room = state.room || state.previewRoom) {
+  const claimed = claimedAvatarIds(room);
+  return avatarOptions.find((avatar) => !claimed.has(avatar.id))?.id || avatarOptions[0].id;
+}
+
+function safeSelectedAvatar(room = state.room || state.previewRoom) {
+  const claimed = claimedAvatarIds(room);
+  return claimed.has(state.selectedAvatar) ? firstAvailableAvatar(room) : state.selectedAvatar;
+}
+
 function lessonStats() {
   const lesson = state.deck?.lessonPlan;
   return `
@@ -162,55 +171,40 @@ function lessonStats() {
 
 function avatarPicker(room = state.room || state.previewRoom) {
   const claimed = claimedAvatarIds(room);
+  const selectedId = safeSelectedAvatar(room);
+  const selected = getAvatar(selectedId);
   const groups = [
-    { id: "class", title: "Class Crew", hint: "Real people and class teams" },
-    { id: "character", title: "Character Crew", hint: "Disney-inspired climbers" }
+    { id: "class", title: "Class Crew" },
+    { id: "character", title: "Character Crew" }
   ];
   return `
-    <div class="avatar-dock">
-      <div class="avatar-dropzone" data-avatar-drop>
-        <span>Selected climber</span>
-        <strong>${escapeHtml(getAvatar(state.selectedAvatar).name)}</strong>
-        <em>Drag a token here or click a token below</em>
+    <div class="avatar-select-card" style="--avatar-color:${selected.color}; --avatar-glow:${selected.glow}">
+      <div class="avatar-assignment">
+        <span>${escapeHtml(selected.short)}</span>
+        <div>
+          <strong>Appointed character: ${escapeHtml(selected.name)}</strong>
+          <em>This is the character that appears on the 3D obstacle course.</em>
+        </div>
       </div>
-      <div class="avatar-groups" aria-label="Choose your climber avatar">
-        ${groups.map((group) => `
-          <section class="avatar-column">
-            <div class="avatar-column-head">
-              <strong>${escapeHtml(group.title)}</strong>
-              <span>${escapeHtml(group.hint)}</span>
-            </div>
-            <div class="avatar-picker">
+      <label class="field avatar-select-field">
+        <span>Character dropdown</span>
+        <select name="avatar" data-avatar-select>
+          ${groups.map((group) => `
+            <optgroup label="${escapeHtml(group.title)}">
               ${avatarOptions.filter((avatar) => avatar.category === group.id).map((avatar) => {
                 const taken = claimed.has(avatar.id);
-                return `
-                  <button type="button" draggable="${taken ? "false" : "true"}" class="avatar-token ${state.selectedAvatar === avatar.id ? "active" : ""} ${taken ? "claimed" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};" ${taken ? "disabled" : ""}>
-                    <span>${escapeHtml(avatar.short)}</span>
-                    <strong>${escapeHtml(avatar.name)}</strong>
-                    <em>${taken ? "Taken" : "Available"}</em>
-                  </button>
-                `;
+                return `<option value="${escapeHtml(avatar.id)}" ${avatar.id === selectedId ? "selected" : ""} ${taken ? "disabled" : ""}>${escapeHtml(avatar.name)}${taken ? " - taken" : ""}</option>`;
               }).join("")}
-            </div>
-          </section>
-        `).join("")}
-      </div>
+            </optgroup>
+          `).join("")}
+        </select>
+      </label>
     </div>
   `;
 }
 
 function homeAvatarPicker() {
-  const featured = avatarOptions.filter((avatar) => ["anikshaa", "joy", "saharsh", "divyam", "vtl", "mickey", "minnie", "donald", "goofy", "stitch", "elsa", "buzz"].includes(avatar.id));
-  return `
-    <div class="avatar-preview-rail">
-      ${featured.map((avatar) => `
-        <button type="button" class="avatar-token compact ${state.selectedAvatar === avatar.id ? "active" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};">
-          <span>${escapeHtml(avatar.short)}</span>
-          <strong>${escapeHtml(avatar.name)}</strong>
-        </button>
-      `).join("")}
-    </div>
-  `;
+  return avatarPicker(null);
 }
 
 function sampleClimbers() {
@@ -321,11 +315,10 @@ function renderHome() {
         </div>
       </div>
       <p class="official-line">Pick a park course, choose an avatar, earn points from BC integration, then spend those points to climb through themed 3D obstacles.</p>
-      ${parkBoard()}
       <div class="home-picker-block">
         <div>
           <span class="badge">30 climbers</span>
-          <h2>Choose your starting avatar</h2>
+          <h2>Choose your appointed character</h2>
         </div>
         ${homeAvatarPicker()}
       </div>
@@ -356,9 +349,8 @@ function renderJoin() {
           <span>Room code</span>
           <input name="roomCode" data-room-code-input maxlength="5" placeholder="ABCDE" value="${escapeHtml(state.previewCode || state.roomCode)}" required />
         </label>
-        <input type="hidden" name="avatar" value="${escapeHtml(state.selectedAvatar)}" />
         <div class="field">
-          <span>Choose your parkour avatar</span>
+          <span>Choose your appointed character</span>
           ${state.previewRoom ? `<p class="notice">Live room found. Taken avatars are locked.</p>` : `<p class="muted">Enter a 5-character room code to see which avatars are already taken.</p>`}
           ${avatarPicker(state.previewRoom)}
         </div>
@@ -626,18 +618,9 @@ app.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   const choiceId = event.target.closest("[data-choice]")?.dataset.choice;
   const power = event.target.closest("[data-power]")?.dataset.power;
-  const avatar = event.target.closest("[data-avatar]")?.dataset.avatar;
   const park = event.target.closest("[data-park]")?.dataset.park;
   const climb = event.target.closest("[data-climb]")?.dataset.climb;
   const duration = event.target.closest("[data-duration]")?.dataset.duration;
-
-  if (avatar) {
-    if (event.target.closest("[data-avatar]")?.disabled) return;
-    state.selectedAvatar = avatar;
-    localStorage.setItem("quizAvatar", avatar);
-    render();
-    return;
-  }
 
   if (duration) {
     state.gameDurationMinutes = Number(duration);
@@ -736,24 +719,11 @@ app.addEventListener("click", async (event) => {
   if (action === "reveal") await api("/api/host/reveal", { roomCode: state.roomCode, hostSecret: state.hostSecret });
 });
 
-app.addEventListener("dragstart", (event) => {
-  const token = event.target.closest("[data-avatar]");
-  if (!token || token.disabled) return;
-  state.dragAvatar = token.dataset.avatar;
-  event.dataTransfer?.setData("text/plain", state.dragAvatar);
-});
-
-app.addEventListener("dragover", (event) => {
-  if (event.target.closest("[data-avatar-drop]")) event.preventDefault();
-});
-
-app.addEventListener("drop", (event) => {
-  if (!event.target.closest("[data-avatar-drop]")) return;
-  event.preventDefault();
-  const avatar = event.dataTransfer?.getData("text/plain") || state.dragAvatar;
-  if (!avatar || claimedAvatarIds(state.previewRoom || state.room).has(avatar)) return;
-  state.selectedAvatar = avatar;
-  localStorage.setItem("quizAvatar", avatar);
+app.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-avatar-select]");
+  if (!select) return;
+  state.selectedAvatar = select.value;
+  localStorage.setItem("quizAvatar", state.selectedAvatar);
   render();
 });
 
@@ -790,6 +760,10 @@ app.addEventListener("input", async (event) => {
   const reply = await getJson(`/api/room?roomCode=${encodeURIComponent(code)}`).catch(() => ({ ok: false }));
   if (state.previewCode !== code) return;
   state.previewRoom = reply.ok ? reply.room : null;
+  if (state.previewRoom && claimedAvatarIds(state.previewRoom).has(state.selectedAvatar)) {
+    state.selectedAvatar = firstAvailableAvatar(state.previewRoom);
+    localStorage.setItem("quizAvatar", state.selectedAvatar);
+  }
   render();
 });
 

@@ -301,15 +301,29 @@ function createScene(THREE, container) {
     const group = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.46, 5, 12), material);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), material);
+    const leftArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.25, 4, 8), accentMaterial);
+    const rightArm = leftArm.clone();
+    const leftLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.24, 4, 8), material);
+    const rightLeg = leftLeg.clone();
     const glow = new THREE.Mesh(
       new THREE.TorusGeometry(0.31, 0.025, 8, 24),
       new THREE.MeshBasicMaterial({ color: avatar.glow })
     );
+    body.position.y = 0.12;
     head.position.y = 0.47;
+    leftArm.position.set(-0.22, 0.19, 0);
+    rightArm.position.set(0.22, 0.19, 0);
+    leftArm.rotation.z = -0.5;
+    rightArm.rotation.z = 0.5;
+    leftLeg.position.set(-0.08, -0.22, 0);
+    rightLeg.position.set(0.08, -0.22, 0);
+    leftLeg.rotation.z = 0.16;
+    rightLeg.rotation.z = -0.16;
     glow.position.y = 0.25;
     glow.rotation.x = Math.PI / 2;
-    group.add(body, head, glow);
+    group.add(leftLeg, rightLeg, body, leftArm, rightArm, head, glow);
     addAvatarFeatures(group, avatar, material, accentMaterial);
+    group.scale.setScalar(1.08);
     players.add(group);
     return group;
   }
