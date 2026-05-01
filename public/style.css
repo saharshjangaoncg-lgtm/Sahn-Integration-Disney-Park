@@ -897,7 +897,49 @@ input:focus {
   border: 1px solid color-mix(in srgb, var(--course-color), transparent 58%);
 }
 
-.climb-controls > div:first-child {
+.assigned-climber {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--avatar-color), transparent 70%), rgba(255, 255, 255, 0.08)),
+    rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--avatar-glow, var(--avatar-color)), transparent 54%);
+}
+
+.assigned-climber > span {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: white;
+  background: var(--avatar-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--avatar-glow, var(--avatar-color)), transparent 68%);
+  font-weight: 950;
+}
+
+.assigned-climber div {
+  display: grid;
+  gap: 2px;
+}
+
+.assigned-climber strong {
+  color: #fff9d7;
+  font-size: 0.98rem;
+}
+
+.assigned-climber em {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.climb-bank {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -958,6 +1000,29 @@ input:focus {
 .climb-buttons .btn:disabled {
   opacity: 0.44;
   filter: grayscale(0.45);
+}
+
+.keyboard-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+kbd {
+  min-width: 26px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 6px;
+  color: #173126;
+  background: linear-gradient(135deg, #bbf7d0, #ffffff);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  box-shadow: inset 0 -2px 0 rgba(23, 49, 38, 0.12);
 }
 
 .height-board,

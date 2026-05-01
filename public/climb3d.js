@@ -93,6 +93,7 @@ function normalizeClimbers(climbers) {
       height: Math.max(0, Number(player.height || 0)),
       direction: Number(player.direction || 0),
       falls: Number(player.falls || 0),
+      lastClimbAt: Number(player.lastClimbAt || 0),
       answered: Boolean(player.answered)
     }))
     .sort((a, b) => b.height - a.height || b.score - a.score)
@@ -398,6 +399,8 @@ function createScene(THREE, container) {
       mesh.userData.targetHeight = player.height;
       mesh.userData.answered = player.answered;
       mesh.userData.falling = player.height === 0 && (player.falls || 0) > 0;
+      mesh.userData.baseY = point.y + 0.45;
+      mesh.userData.lastClimbAt = player.lastClimbAt;
     });
 
     for (const [id, mesh] of playerMeshes) {
@@ -430,8 +433,11 @@ function createScene(THREE, container) {
     tower.rotation.y = Math.sin(frame * 0.22) * 0.035;
     players.rotation.y = tower.rotation.y;
     players.children.forEach((mesh, index) => {
-      mesh.position.y += Math.sin(frame * 5 + index) * 0.002;
-      mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.18 : 0;
+      const jumpAge = mesh.userData.lastClimbAt ? Date.now() - mesh.userData.lastClimbAt : 9999;
+      const jumpLift = jumpAge < 680 ? Math.sin((jumpAge / 680) * Math.PI) * 0.48 : 0;
+      const bob = Math.sin(frame * 5 + index) * 0.035;
+      mesh.position.y = (mesh.userData.baseY || mesh.position.y) + bob + jumpLift;
+      mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
       mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
     });
     camera.lookAt(cameraTarget);

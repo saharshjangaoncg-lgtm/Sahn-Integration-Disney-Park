@@ -262,9 +262,17 @@ function climbPanel(title = "3D Infinite Parkour Climb") {
 
 function climbControls(player, canClimb, climbCost, climbHeight) {
   const next = player.nextObstacle || { title: "First Jump", label: "Forward", description: "Take the safe center lane." };
+  const avatar = getAvatar(player.avatar);
   return `
     <div class="climb-controls">
-      <div>
+      <div class="assigned-climber" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow}">
+        <span>${escapeHtml(avatar.short)}</span>
+        <div>
+          <strong>Assigned character: ${escapeHtml(avatar.name)}</strong>
+          <em>Your selected avatar is the climber on the 3D course.</em>
+        </div>
+      </div>
+      <div class="climb-bank">
         <strong>${player.score || 0} pts</strong>
         <span>${Math.floor((player.score || 0) / climbCost)} climbs ready</span>
       </div>
@@ -277,6 +285,11 @@ function climbControls(player, canClimb, climbCost, climbHeight) {
         <button class="btn secondary" data-climb="left" ${canClimb ? "" : "disabled"}>Left +${climbHeight} ft</button>
         <button class="btn gold" data-climb="straight" ${canClimb ? "" : "disabled"}>Forward +${climbHeight} ft</button>
         <button class="btn secondary" data-climb="right" ${canClimb ? "" : "disabled"}>Right +${climbHeight} ft</button>
+      </div>
+      <div class="keyboard-hint">
+        <kbd>A</kbd><kbd>←</kbd><span>left</span>
+        <kbd>W</kbd><kbd>↑</kbd><kbd>Space</kbd><span>jump forward</span>
+        <kbd>D</kbd><kbd>→</kbd><span>right</span>
       </div>
       ${canClimb ? "" : `<p class="muted">No climb available yet. Earn at least ${climbCost} points from questions or powers.</p>`}
     </div>
