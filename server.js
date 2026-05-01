@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "public");
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 const rooms = new Map();
 const subscribers = new Map();
@@ -458,6 +459,6 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
-server.listen(PORT, () => {
-  console.log(`Notion quiz game running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Notion quiz game running on http://${HOST}:${PORT}`);
 });
