@@ -1,3 +1,5 @@
+import { avatarOptions, getAvatar, renderClimbScene } from "./climb3d.js";
+
 const app = document.querySelector("#app");
 
 const state = {
@@ -8,6 +10,7 @@ const state = {
   playerId: localStorage.getItem("quizPlayerId") || "",
   hostSecret: localStorage.getItem("quizHostSecret") || "",
   roomCode: localStorage.getItem("quizRoomCode") || "",
+  selectedAvatar: localStorage.getItem("quizAvatar") || "mickey",
   answeredChoiceId: "",
   error: "",
   events: null,
@@ -104,8 +107,62 @@ function lessonStats() {
       <div><strong>${state.deck?.questions?.length || 0}</strong><span>Missions</span></div>
       <div><strong>${lesson?.gameMinutes || 0}</strong><span>Game min</span></div>
       <div><strong>${lesson?.debriefMinutes || 0}</strong><span>Debrief min</span></div>
-      <div><strong>Live</strong><span>Room code</span></div>
+      <div><strong>3D</strong><span>Climb race</span></div>
     </div>
+  `;
+}
+
+function avatarPicker() {
+  return `
+    <div class="avatar-picker" aria-label="Choose your climber avatar">
+      ${avatarOptions.map((avatar) => `
+        <button type="button" class="avatar-token ${state.selectedAvatar === avatar.id ? "active" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};">
+          <span>${escapeHtml(avatar.short)}</span>
+          <strong>${escapeHtml(avatar.name)}</strong>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function sampleClimbers() {
+  return [
+    { id: "saharsh", name: "Saharsh", avatar: "saharsh", score: 18400, height: 842 },
+    { id: "anikshaa", name: "Anikshaa", avatar: "anikshaa", score: 16300, height: 735 },
+    { id: "joy", name: "Joy", avatar: "joy", score: 14100, height: 641 },
+    { id: "divyam", name: "Divyam", avatar: "divyam", score: 12050, height: 548 },
+    { id: "vtl", name: "VTL", avatar: "vtl", score: 9600, height: 436 }
+  ];
+}
+
+function climbPlayers() {
+  const players = state.room?.players?.length ? state.room.players : sampleClimbers();
+  return [...players].sort((a, b) => (b.height || 0) - (a.height || 0) || (b.score || 0) - (a.score || 0));
+}
+
+function climbPanel(title = "3D Infinite Parkour Climb") {
+  const players = climbPlayers();
+  const rows = players.slice(0, 5).map((player, index) => {
+    const avatar = getAvatar(player.avatar);
+    return `
+      <div class="height-row" style="--avatar-color:${avatar.color}">
+        <span>${escapeHtml(avatar.short)}</span>
+        <strong>#${index + 1} ${escapeHtml(player.name)}</strong>
+        <em>${Math.round(player.height || 0)} ft</em>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <section class="climb-shell">
+      <div class="climb-copy">
+        <span class="badge">Points become height</span>
+        <h2>${escapeHtml(title)}</h2>
+        <p class="muted">Correct answers, streak bonuses, speed bonuses, steals, and nukes push your avatar higher on a looping parkour tower. The course repeats every 900 ft, so the race can keep going.</p>
+        <div class="height-board">${rows}</div>
+      </div>
+      <div id="climb-stage" class="climb-stage" aria-label="3D parkour tower"></div>
+    </section>
   `;
 }
 
@@ -133,10 +190,12 @@ function renderHome() {
           <a class="btn secondary btn-link" href="/lessons.html">Lesson Map</a>
         </div>
       </div>
-      <p class="official-line">Pick a character team, race through 30 BC integration missions, unlock streak powers, and climb the final leaderboard.</p>
+      <p class="official-line">Pick an avatar, race through 30 harder BC integration missions, unlock streak powers, and climb the 3D infinite parkour leaderboard.</p>
+      ${avatarPicker()}
       ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
     </section>
     ${lessonStats()}
+    ${climbPanel("Preview the Infinite Disney Parkour Tower")}
     ${parkBoard()}
   `);
 }
@@ -154,6 +213,11 @@ function renderJoin() {
           <span>Room code</span>
           <input name="roomCode" maxlength="5" placeholder="ABCDE" value="${escapeHtml(state.roomCode)}" required />
         </label>
+        <input type="hidden" name="avatar" value="${escapeHtml(state.selectedAvatar)}" />
+        <div class="field">
+          <span>Choose your parkour avatar</span>
+          ${avatarPicker()}
+        </div>
         ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
         <button class="btn gold" type="submit">Enter Park</button>
         <button class="btn secondary" type="button" data-action="home">Back</button>
@@ -161,8 +225,8 @@ function renderJoin() {
       <aside class="panel solution">
         <span class="badge">Student Entrance</span>
         <h2>How players use this in Notion</h2>
-        <p>Open the Notion page, click the embedded game, type the room code from the host screen, and answer before time runs out.</p>
-        <p class="notice">Use your real first name or initials so the teacher can read the leaderboard.</p>
+        <p>Open the Notion page, choose an avatar, type the room code from the host screen, and answer before time runs out.</p>
+        <p class="notice">Every correct answer turns points into climb height. The leaderboard ranks the highest parkour climbers first.</p>
       </aside>
     </section>
   `);
@@ -186,6 +250,7 @@ function renderLobby() {
         <h2>Players</h2>
         <div class="player-list">${players}</div>
       </div>
+      ${climbPanel(isHost ? "Live Lobby Climb Preview" : "Your Avatar Is Checked In")}
     </section>
   `);
 }
@@ -193,17 +258,17 @@ function renderLobby() {
 function playerRow(player) {
   return `
     <div class="player-row">
-      <strong>${escapeHtml(player.name)}</strong>
-      <span class="badge">${player.score} pts${player.answered ? " · checked in" : ""}</span>
+      <strong><span class="mini-avatar" style="--avatar-color:${getAvatar(player.avatar).color}">${escapeHtml(getAvatar(player.avatar).short)}</span>${escapeHtml(player.name)}</strong>
+      <span class="badge">${Math.round(player.height || 0)} ft · ${player.score} pts${player.answered ? " · checked in" : ""}</span>
     </div>
   `;
 }
 
-function rankBadge(index, score) {
+function rankBadge(index, height) {
   if (index === 0) return "Castle Champion";
-  if (score >= 20000) return "Fireworks Scholar";
-  if (score >= 12000) return "EPCOT Expert";
-  if (score >= 7000) return "Main Street Master";
+  if (height >= 1500) return "Skyline Legend";
+  if (height >= 900) return "Loop Breaker";
+  if (height >= 500) return "Tower Runner";
   return "Park Explorer";
 }
 
@@ -262,8 +327,8 @@ function renderResults() {
   const results = state.room.lastResults;
   const rows = (results?.playerResults || []).map((result, index) => `
     <div class="result-row">
-      <strong>#${index + 1} ${escapeHtml(result.name)}</strong>
-      <span class="badge">${result.isCorrect ? `+${result.pointsAwarded}` : "Missed"} · ${result.frozenPenalty ? "frozen" : result.speedBonus ? `speed +${result.speedBonus}` : "no speed"} · ${result.score} pts</span>
+      <strong><span class="mini-avatar" style="--avatar-color:${getAvatar(result.avatar).color}">${escapeHtml(getAvatar(result.avatar).short)}</span>#${index + 1} ${escapeHtml(result.name)}</strong>
+      <span class="badge">${result.isCorrect ? `+${result.pointsAwarded} pts · +${result.heightGain} ft` : "Missed"} · ${result.frozenPenalty ? "frozen" : result.speedBonus ? `speed +${result.speedBonus}` : "no speed"} · ${Math.round(result.height || 0)} ft</span>
     </div>
   `).join("") || `<p class="muted">No answers submitted.</p>`;
 
@@ -277,7 +342,7 @@ function renderResults() {
         <div class="score-breakdown">
           <div><strong>${results?.pointValue || 0}</strong><span>Base</span></div>
           <div><strong>Speed</strong><span>Up to 50%</span></div>
-          <div><strong>${results?.bonusPoints || 0}</strong><span>${escapeHtml(results?.bonusLabel || "Bonus")}</span></div>
+          <div><strong>Height</strong><span>1 ft per 22 pts</span></div>
         </div>
         <div class="actions">
           ${state.role === "host" ? `<button class="btn gold" data-action="next">${state.room.currentQuestionIndex >= state.room.totalQuestions - 1 ? "Finish Game" : "Next Mission"}</button>` : `<span class="badge">Waiting for host</span>`}
@@ -286,10 +351,11 @@ function renderResults() {
         ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
       </div>
       <div class="panel leaderboard">
-        <h2>Scoreboard</h2>
+        <h2>Climb Leaderboard</h2>
         ${rows}
         ${powerLog()}
       </div>
+      ${climbPanel("Results Tower")}
     </section>
   `);
 }
@@ -339,11 +405,11 @@ function powerLog() {
 
 function renderFinished() {
   const rows = [...state.room.players]
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => (b.height || 0) - (a.height || 0) || b.score - a.score)
     .map((player, index) => `
       <div class="result-row">
-        <strong>#${index + 1} ${escapeHtml(player.name)}</strong>
-        <span class="badge">${escapeHtml(rankBadge(index, player.score))} · ${player.score} pts</span>
+        <strong><span class="mini-avatar" style="--avatar-color:${getAvatar(player.avatar).color}">${escapeHtml(getAvatar(player.avatar).short)}</span>#${index + 1} ${escapeHtml(player.name)}</strong>
+        <span class="badge">${escapeHtml(rankBadge(index, player.height || 0))} · ${Math.round(player.height || 0)} ft · ${player.score} pts</span>
       </div>
     `).join("");
 
@@ -351,13 +417,19 @@ function renderFinished() {
     <section class="grid">
       <div class="panel solution">
         <span class="badge">Quest Complete</span>
-        <h2>Final Scores</h2>
-        <p>Use the leaderboard to award badges, recovery credit, or a quick notebook reflection. The strongest presentation move is to show one question, explain the scoring, then show where you edit the deck.</p>
+        <h2>Final Parkour Heights</h2>
+        <p>The final winner is the player who climbed the highest. Use the leaderboard for awards, recovery credit, or a quick notebook reflection.</p>
         <button class="btn secondary" data-action="home">Back Home</button>
       </div>
       <div class="panel leaderboard">${rows}</div>
+      ${climbPanel("Final Infinite Climb")}
     </section>
   `);
+}
+
+function mountInteractiveScenes() {
+  const stage = document.querySelector("#climb-stage");
+  if (stage) renderClimbScene(stage, climbPlayers());
 }
 
 function render() {
@@ -368,12 +440,21 @@ function render() {
   else if (state.room?.status === "results") app.innerHTML = renderResults();
   else if (state.room?.status === "finished") app.innerHTML = renderFinished();
   else app.innerHTML = renderHome();
+  mountInteractiveScenes();
 }
 
 app.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   const choiceId = event.target.closest("[data-choice]")?.dataset.choice;
   const power = event.target.closest("[data-power]")?.dataset.power;
+  const avatar = event.target.closest("[data-avatar]")?.dataset.avatar;
+
+  if (avatar) {
+    state.selectedAvatar = avatar;
+    localStorage.setItem("quizAvatar", avatar);
+    render();
+    return;
+  }
 
   if (power) {
     const reply = await api("/api/player/power", {
@@ -454,7 +535,8 @@ app.addEventListener("submit", async (event) => {
   const data = new FormData(form);
   const reply = await api("/api/player/join", {
     name: data.get("name"),
-    roomCode: data.get("roomCode")
+    roomCode: data.get("roomCode"),
+    avatar: data.get("avatar") || state.selectedAvatar
   });
   if (reply.ok) {
     state.view = "room";

@@ -25,6 +25,8 @@ const mimeTypes = {
   ".svg": "image/svg+xml"
 };
 
+const avatarIds = new Set(["mickey", "minnie", "donald", "goofy", "anikshaa", "joy", "saharsh", "divyam", "vtl"]);
+
 function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -75,6 +77,15 @@ function sanitizeName(name) {
     .slice(0, 24) || "Guest";
 }
 
+function sanitizeAvatar(avatar) {
+  const normalized = String(avatar || "").toLowerCase();
+  return avatarIds.has(normalized) ? normalized : "mickey";
+}
+
+function heightFromPoints(points) {
+  return Math.max(0, Math.round(points / 22));
+}
+
 function playerQuestion(question, includeChoices) {
   return {
     id: question.id,
@@ -111,6 +122,8 @@ function publicRoom(room) {
       id: player.id,
       name: player.name,
       score: player.score,
+      height: player.height ?? 0,
+      avatar: player.avatar || "mickey",
       streak: player.streak,
       answered: Boolean(room.answers.get(player.id)),
       frozenNext: player.frozenQuestionIndex === room.currentQuestionIndex + 1 || player.frozenQuestionIndex === room.currentQuestionIndex,
@@ -153,7 +166,9 @@ function computeResults(room) {
     let speedBonus = 0;
     let streakBonus = 0;
     let badgeBonus = 0;
+    let heightGain = 0;
     let frozenPenalty = false;
+    player.height ??= 0;
 
     if (isCorrect) {
       const maxMs = question.timeLimitSeconds * 1000;
@@ -165,6 +180,8 @@ function computeResults(room) {
       badgeBonus = player.streak >= 3 ? bonusPoints : 0;
       pointsAwarded = basePoints + speedBonus + streakBonus + badgeBonus;
       player.score += pointsAwarded;
+      heightGain = heightFromPoints(pointsAwarded);
+      player.height += heightGain;
     } else {
       player.streak = 0;
     }
@@ -181,8 +198,11 @@ function computeResults(room) {
       isCorrect,
       responseMs,
       score: player.score,
+      height: player.height ?? 0,
+      avatar: player.avatar || "mickey",
       streak: player.streak,
       pointsAwarded,
+      heightGain,
       speedBonus,
       streakBonus,
       badgeBonus,
@@ -190,7 +210,7 @@ function computeResults(room) {
     };
   });
 
-  playerResults.sort((a, b) => b.score - a.score);
+  playerResults.sort((a, b) => b.height - a.height || b.score - a.score);
   return {
     questionId: question.id,
     pointValue: basePoints,
@@ -228,9 +248,9 @@ function syncLastResultScores(room) {
   const playersById = new Map(room.players);
   room.lastResults.playerResults = room.lastResults.playerResults.map((result) => {
     const player = playersById.get(result.id);
-    return player ? { ...result, score: player.score, streak: player.streak } : result;
+    return player ? { ...result, score: player.score, height: player.height, streak: player.streak } : result;
   });
-  room.lastResults.playerResults.sort((a, b) => b.score - a.score);
+  room.lastResults.playerResults.sort((a, b) => b.height - a.height || b.score - a.score);
   room.lastResults.powerLog = (room.actionLog || []).slice(-6);
 }
 
@@ -262,7 +282,9 @@ function usePlayerPower(room, playerId, power) {
     if (amount <= 0) throw new Error("That rival has no points to steal.");
     topRival.score -= amount;
     actor.score += amount;
-    room.actionLog.push(`${actor.name} stole ${amount} points from ${topRival.name}.`);
+    const climb = heightFromPoints(amount);
+    actor.height += climb;
+    room.actionLog.push(`${actor.name} stole ${amount} points from ${topRival.name} and climbed ${climb} ft.`);
   } else if (normalizedPower === "freeze") {
     if (actor.streak < 4) throw new Error("Freeze unlocks at a 4-question streak.");
     topRival.frozenQuestionIndex = room.currentQuestionIndex + 1;
@@ -278,7 +300,9 @@ function usePlayerPower(room, playerId, power) {
       totalDrained += drained;
     }
     actor.score += totalDrained;
-    room.actionLog.push(`${actor.name} nuked the leaderboard and absorbed ${totalDrained} points.`);
+    const climb = heightFromPoints(totalDrained);
+    actor.height += climb;
+    room.actionLog.push(`${actor.name} nuked the leaderboard, absorbed ${totalDrained} points, and climbed ${climb} ft.`);
   } else {
     throw new Error("Unknown power move.");
   }
@@ -381,7 +405,9 @@ async function handleApi(req, res) {
       room.players.set(playerId, {
         id: playerId,
         name: sanitizeName(body.name),
+        avatar: sanitizeAvatar(body.avatar),
         score: 0,
+        height: 0,
         streak: 0,
         frozenQuestionIndex: null,
         powerUsedQuestion: -1

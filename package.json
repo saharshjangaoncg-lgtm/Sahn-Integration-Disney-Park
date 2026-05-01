@@ -1,7 +1,7 @@
 {
   "name": "ansa-integration-disney-park-challenge-practice",
   "version": "1.0.0",
-  "description": "A zero-dependency Notion-embeddable Kahoot-style multiplayer quiz game for AnSa Integration Disney Park Challenge Practice.",
+  "description": "A Notion-embeddable Kahoot-style multiplayer BC calculus quiz game with avatar climbing and a 3D parkour leaderboard.",
   "main": "server.js",
   "type": "module",
   "scripts": {

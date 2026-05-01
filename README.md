@@ -36,9 +36,11 @@ The exact URL depends on whether the name is available on the hosting service.
 
 ## Included final deliverables
 
-- 30-question Disney-themed AP Calculus BC Unit 6 quiz.
+- 30-question harder Disney-themed AP Calculus BC Unit 6 quiz.
 - Live multiplayer host/player interface.
-- Base points, speed bonus, streak bonus, power moves, and final award badges.
+- Avatar selection before joining a live room.
+- Base points, speed bonus, streak bonus, power moves, climb height, and final award badges.
+- 3D infinite parkour tower where points become height and the course loops every 900 feet.
 - Web-based Unit 6 slide lesson page.
 - Editable PowerPoint slide deck:
 
@@ -251,7 +253,7 @@ Use this exact order when presenting:
 
 ## Scoring and power moves
 
-The game has a final leaderboard at the end.
+The game has a final leaderboard at the end. The main race is now ranked by climb height first, then points.
 
 Scoring:
 
@@ -259,12 +261,14 @@ Scoring:
 - Fast correct answer: speed bonus.
 - Consecutive correct answers: streak bonus.
 - Three-question streak: badge bonus.
+- Every 22 points becomes about 1 foot of parkour height.
+- The 3D tower loops after 900 feet, so a player can keep climbing into Loop 2, Loop 3, and beyond.
 
 Power moves happen on the results screen:
 
-- `Steal`: unlocks at a 3-streak and takes 300 points from the top rival.
+- `Steal`: unlocks at a 3-streak and takes 300 points from the top rival, then converts those points into climb height.
 - `Freeze`: unlocks at a 4-streak and removes the top rival's speed bonus on the next question.
-- `Nuke`: unlocks at a 5-streak and drains 200 points from each player currently ahead of you, then gives those points to you.
+- `Nuke`: unlocks at a 5-streak and drains 200 points from each player currently ahead of you, then gives those points and climb height to you.
 
 Each player can use only one power move per results screen.
 
@@ -306,9 +310,9 @@ Presentation order:
 6. Click `Host Game` and show the room code.
 7. Open a second tab or ask a classmate to join.
 8. Start the game and answer one question.
-9. Show the result screen with points, speed bonus, power moves, and worked solution.
+9. Show the result screen with points, speed bonus, climb height, power moves, and worked solution.
 10. Explain that you can edit the questions in `data/questions.js`.
-11. Finish by showing the PowerPoint deck and student deliverable.
+11. Finish by showing the 3D infinite parkour leaderboard, PowerPoint deck, and student deliverable.
 
 What to say about the code:
 

@@ -1,3 +1,26 @@
+const colors = ["#e63946", "#168bd3", "#5fa470", "#f6d24a", "#8b5cf6"];
+
+function choice(id, park, text, correct = false, color = colors[0]) {
+  return { id, park, text, color, ...(correct ? { correct: true } : {}) };
+}
+
+function mission(index, title, story, prompt, difficulty, timeLimitSeconds, choices, explanation, workedSolution, pointValue = 1400) {
+  return {
+    id: `triple-t-${String(index).padStart(2, "0")}`,
+    title,
+    story,
+    prompt,
+    difficulty,
+    timeLimitSeconds,
+    pointValue,
+    bonusPoints: difficulty.includes("Hard") || difficulty.includes("BC") ? 260 : 190,
+    bonusLabel: "Parkour streak lift",
+    choices,
+    explanation,
+    workedSolution
+  };
+}
+
 export const lessonDeck = {
   title: "Triple T Integration Disney Park Challenge",
   subtitle: "AnSa Integration Practice Park",
@@ -16,499 +39,146 @@ export const lessonDeck = {
     ]
   },
   lessonPlan: {
-    objective: "Students will evaluate integrals, choose appropriate integration methods, and explain their reasoning under timed review-game conditions.",
+    objective: "Students will evaluate harder Unit 6 integrals, choose methods, connect accumulation to total change, and explain reasoning during a live multiplayer climb race.",
     warmupMinutes: 5,
-    gameMinutes: 35,
+    gameMinutes: 45,
     debriefMinutes: 12,
     teacherMoves: [
-      "Start in lobby mode while students join from the Notion embed or shared link.",
-      "Before each question, ask students which method they expect to use.",
+      "Start in lobby mode while students choose avatars and join from the Notion embed or shared link.",
+      "Before each question, ask students which method they expect to use and why.",
       "After results, use the worked solution as the mini-lesson.",
-      "Let students revise one missed problem in their notebooks for recovery credit.",
-      "Use the final leaderboard as an engagement tool, not as the only grade."
+      "Point out how points convert into height on the 3D parkour leaderboard.",
+      "Let students revise one missed problem in their notebooks for recovery credit."
     ],
     studentDeliverable: "Each student records the method, final answer, and one sentence explaining why that method works for at least four questions."
   },
   questions: [
-    {
-      id: "triple-i-1",
-      title: "Mickey's Castle Ticket Dash",
-      story: "Mickey opens the Triple T gates with one fast area-under-the-curve warmup.",
-      prompt: "Evaluate ∫ from 0 to 3 of (2x + 1) dx.",
-      difficulty: "Warmup",
-      timeLimitSeconds: 30,
-      choices: [
-        { id: "a", park: "Magic Kingdom", text: "12", color: "#f94144", correct: true },
-        { id: "b", park: "EPCOT", text: "9", color: "#277da1" },
-        { id: "c", park: "Animal Kingdom", text: "10", color: "#90be6d" },
-        { id: "d", park: "Hollywood Studios", text: "6", color: "#f9c74f" }
+    mission(
+      1,
+      "Anikshaa Opens the Accumulation Gates",
+      "Anikshaa checks the castle entry theorem before the parkour race begins.",
+      "If F(x)=∫ from 0 to x of f(t) dt, F(a)=-2, and F(b)=-2 where a<b, which statement must be true?",
+      "FTC + MVT",
+      80,
+      [
+        choice("a", "Castle Gate", "f(c)=0 for some c in (a,b)", true, colors[0]),
+        choice("b", "EPCOT Sphere", "f(x)>0 for all x in (a,b)", false, colors[1]),
+        choice("c", "Sky Bridge", "f(x)<0 for all x in (a,b)", false, colors[2]),
+        choice("d", "Tower Drop", "F(x)<=0 for all x in (a,b)", false, colors[3])
       ],
-      explanation: "The antiderivative is x^2 + x. Evaluate from 0 to 3.",
-      workedSolution: "F(3)-F(0) = (3^2 + 3) - 0 = 12."
-    },
-    {
-      id: "triple-i-2",
-      title: "Minnie Spins the EPCOT Sphere",
-      story: "Minnie spots the hidden inside function and turns substitution into a shortcut.",
-      prompt: "Evaluate ∫ 2x(x^2 + 5)^4 dx.",
-      difficulty: "u-substitution",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Norway Pavilion", text: "(x^2 + 5)^5 + C", color: "#43aa8b" },
-        { id: "b", park: "The Land", text: "((x^2 + 5)^5)/5 + C", color: "#577590", correct: true },
-        { id: "c", park: "Test Track", text: "10x(x^2 + 5)^3 + C", color: "#f3722c" },
-        { id: "d", park: "Mission Space", text: "2x^2(x^2 + 5)^5 + C", color: "#7209b7" }
+      "F is continuous and differentiable, and F(a)=F(b), so Rolle's Theorem applies.",
+      "There is a c in (a,b) with F'(c)=0. Since F'(x)=f(x), f(c)=0.",
+      1300
+    ),
+    mission(
+      2,
+      "Joy Restores the Initial Value Map",
+      "Joy finds an antiderivative clue hidden inside the Mickey's Math notebook.",
+      "If G is an antiderivative of f and G(2)=-7, which expression gives G(4)?",
+      "Accumulation with initial value",
+      75,
+      [
+        choice("a", "Monorail", "f'(4)", false, colors[0]),
+        choice("b", "Main Street", "-7+f'(4)", false, colors[1]),
+        choice("c", "Castle Hub", "∫ from 2 to 4 of f(t) dt", false, colors[2]),
+        choice("d", "Storybook Path", "∫ from 2 to 4 of (-7+f(t)) dt", false, colors[3]),
+        choice("e", "Firework Trail", "-7+∫ from 2 to 4 of f(t) dt", true, colors[4])
       ],
-      explanation: "Use u = x^2 + 5, so du = 2x dx.",
-      workedSolution: "∫ 2x(x^2+5)^4 dx = ∫ u^4 du = u^5/5 + C = (x^2+5)^5/5 + C."
-    },
-    {
-      id: "triple-i-3",
-      title: "Donald Drops the Tower of Parts",
-      story: "Donald hits the elevator button, and integration by parts decides where it lands.",
-      prompt: "Evaluate ∫ x e^x dx.",
-      difficulty: "Integration by parts",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Tower Hotel", text: "xe^x - e^x + C", color: "#1d3557", correct: true },
-        { id: "b", park: "Sunset Boulevard", text: "xe^x + e^x + C", color: "#e63946" },
-        { id: "c", park: "Fantasmic", text: "x^2e^x/2 + C", color: "#457b9d" },
-        { id: "d", park: "Runaway Railway", text: "e^x + C", color: "#ffbe0b" }
+      "An antiderivative changes by the integral of its derivative.",
+      "G(4)=G(2)+∫_2^4 G'(t)dt=-7+∫_2^4 f(t)dt.",
+      1300
+    ),
+    mission(
+      3,
+      "Saharsh's July 2 Pipeline Parade",
+      "On Saharsh's birthday, July 2, the parade rate is measured like the AP accumulation graph question.",
+      "A flow rate in barrels/hour is recorded at t=0,6,12,18,24 as 90,105,200,105,90. Which best approximates the total barrels by the trapezoidal rule?",
+      "Accumulation from table",
+      95,
+      [
+        choice("a", "Birthday Dock", "500", false, colors[0]),
+        choice("b", "July Pier", "600", false, colors[1]),
+        choice("c", "Pipeline Pass", "2400", false, colors[2]),
+        choice("d", "Festival Bridge", "3000", true, colors[3]),
+        choice("e", "Castle Reservoir", "4800", false, colors[4])
       ],
-      explanation: "Let u = x and dv = e^x dx. Then du = dx and v = e^x.",
-      workedSolution: "∫x e^x dx = x e^x - ∫e^x dx = xe^x - e^x + C."
-    },
-    {
-      id: "triple-i-4",
-      title: "Goofy Finds the Pirates' Fraction Map",
-      story: "Goofy splits the treasure clue into smaller pieces before the timer runs out.",
-      prompt: "Decompose 1/(x^2 - 1).",
-      difficulty: "Partial fractions",
-      timeLimitSeconds: 60,
-      choices: [
-        { id: "a", park: "Pirates", text: "1/(x - 1) + 1/(x + 1)", color: "#073b4c" },
-        { id: "b", park: "Adventureland", text: "1/2 · 1/(x - 1) - 1/2 · 1/(x + 1)", color: "#118ab2", correct: true },
-        { id: "c", park: "Skull Rock", text: "1/(x - 1) - 1/(x + 1)", color: "#06d6a0" },
-        { id: "d", park: "Jolly Roger", text: "x/(x - 1) - x/(x + 1)", color: "#ef476f" }
+      "Use four trapezoids of width 6 hours.",
+      "6/2[90+2(105)+2(200)+2(105)+90]=3(1000)=3000.",
+      1450
+    ),
+    mission(
+      4,
+      "Divyam Drops the Integration-By-Parts Tower",
+      "Divyam rides the Tower of BC and has to choose u before the elevator falls.",
+      "Find ∫ (x/2)e^(-3x/4) dx.",
+      "Integration by parts Hard",
+      110,
+      [
+        choice("a", "Tower Hotel", "-(3x/4)e^(-3x/4)+(3/4)e^(-3x/4)+C", false, colors[0]),
+        choice("b", "Sunset Lift", "-(2x/3)e^(-3x/4)-(8/9)e^(-3x/4)+C", true, colors[1]),
+        choice("c", "Lightning Lane", "-(x/2)e^(-3x/4)+(3/8)e^(-3x/4)+C", false, colors[2]),
+        choice("d", "Drop Shaft", "(x/2)e^(-3x/4)-(1/2)e^(-3x/4)+C", false, colors[3])
       ],
-      explanation: "Factor x^2 - 1 = (x - 1)(x + 1), then solve A/(x-1)+B/(x+1).",
-      workedSolution: "1 = A(x+1)+B(x-1). Setting x=1 gives A=1/2. Setting x=-1 gives B=-1/2."
-    },
-    {
-      id: "triple-i-5",
-      title: "Daisy's Resort Riemann Race",
-      story: "Daisy estimates the walking route from table values before the parade starts.",
-      prompt: "Using a right Riemann sum with Δx = 2 for f(0)=1, f(2)=3, f(4)=4, f(6)=6, estimate ∫ from 0 to 6 f(x) dx.",
-      difficulty: "Riemann sums",
-      timeLimitSeconds: 40,
-      choices: [
-        { id: "a", park: "Resort Loop", text: "16", color: "#ffd166" },
-        { id: "b", park: "Monorail", text: "20", color: "#3a86ff" },
-        { id: "c", park: "Reminder Resort", text: "26", color: "#ff006e", correct: true },
-        { id: "d", park: "BoardWalk", text: "14", color: "#8338ec" }
+      "Use integration by parts or the shortcut for ∫xe^(kx)dx.",
+      "With k=-3/4, ∫(x/2)e^(kx)dx=(1/2)e^(kx)(x/k-1/k^2)+C=-(2x/3)e^(-3x/4)-(8/9)e^(-3x/4)+C.",
+      1800
+    ),
+    mission(
+      5,
+      "VTL Splits the Absolute Value Bridge",
+      "VTL notices the bridge changes direction at x=3.",
+      "Evaluate ∫ from 1 to 4 of |x-3| dx.",
+      "Absolute value integral",
+      85,
+      [
+        choice("a", "Left Bridge", "-3/2", false, colors[0]),
+        choice("b", "Right Bridge", "3/2", false, colors[1]),
+        choice("c", "Center Split", "5/2", true, colors[2]),
+        choice("d", "High Rail", "9/2", false, colors[3]),
+        choice("e", "Park Exit", "5", false, colors[4])
       ],
-      explanation: "For a right sum on [0,6] with width 2, use x = 2, 4, 6.",
-      workedSolution: "2[f(2)+f(4)+f(6)] = 2(3+4+6) = 26."
-    },
-    {
-      id: "triple-i-6",
-      title: "Castle Crew Improper Portal",
-      story: "The Castle Crew checks whether an infinite trail still has a finite prize.",
-      prompt: "Does ∫ from 1 to infinity of 1/x^2 dx converge, and what is its value?",
-      difficulty: "Improper integrals",
-      timeLimitSeconds: 55,
-      choices: [
-        { id: "a", park: "Final Fireworks", text: "Converges to 1", color: "#fb5607", correct: true },
-        { id: "b", park: "Castle Hub", text: "Converges to 2", color: "#ffbe0b" },
-        { id: "c", park: "Tomorrowland", text: "Diverges to infinity", color: "#3a86ff" },
-        { id: "d", park: "Main Street", text: "Diverges to 0", color: "#8338ec" }
+      "Break the integral where the absolute value changes sign.",
+      "∫_1^3(3-x)dx+∫_3^4(x-3)dx=2+1/2=5/2.",
+      1400
+    ),
+    mission(6, "Anikshaa's Haunted Initial Value", "Anikshaa tracks a ghost counter from one station to another.", "H(1)=4 and H'(x)=r(x). A trapezoidal estimate for ∫ from 1 to 5 of r(x) dx is 7. What is H(5)?", "Accumulation", 75, [choice("a", "Ghost Lobby", "3", false, colors[0]), choice("b", "Stretch Room", "7", false, colors[1]), choice("c", "Attic", "11", true, colors[2]), choice("d", "Graveyard", "28", false, colors[3])], "Total change equals the integral of the rate.", "H(5)=H(1)+∫_1^5 r(x)dx=4+7=11.", 1250),
+    mission(7, "Joy Chains the Variable Limit Coaster", "Joy sees that the lower limit is moving, so the sign matters.", "If Q(x)=∫ from x^2 to 5 of sin(t^3) dt, find Q'(x).", "FTC with chain rule", 95, [choice("a", "Loop Track", "2x sin(x^6)", false, colors[0]), choice("b", "Reverse Launch", "-2x sin(x^6)", true, colors[1]), choice("c", "Launch Bay", "sin(x^2)", false, colors[2]), choice("d", "Brake Run", "-sin(x^6)", false, colors[3])], "A variable lower limit creates a negative sign, then chain rule multiplies by 2x.", "Q'(x)=-sin((x^2)^3)(2x)=-2x sin(x^6).", 1600),
+    mission(8, "Saharsh's Birthday Sphere Substitution", "The July 2 fireworks sphere opens only if the inside derivative appears.", "Find ∫ x√(x^2+9) dx.", "u-substitution", 85, [choice("a", "Sphere Gate", "(1/3)(x^2+9)^(3/2)+C", true, colors[0]), choice("b", "Birthday Rail", "(x^2+9)^(3/2)+C", false, colors[1]), choice("c", "Skyline", "x^2√(x^2+9)+C", false, colors[2]), choice("d", "Castle Loop", "(2/3)(x^2+9)^(3/2)+C", false, colors[3])], "Let u=x^2+9, so du=2x dx.", "∫x√(x^2+9)dx=(1/2)∫u^(1/2)du=(1/3)u^(3/2)+C.", 1450),
+    mission(9, "Divyam Logs the Test Track Launch", "Divyam turns a rational expression into a natural log checkpoint.", "Evaluate ∫ from 0 to 2 of 2x/(x^2+1) dx.", "Definite u-substitution", 85, [choice("a", "Test Track", "ln 5", true, colors[0]), choice("b", "Launch Lane", "2ln 5", false, colors[1]), choice("c", "Pit Stop", "ln 3", false, colors[2]), choice("d", "Speedway", "5", false, colors[3])], "Use u=x^2+1 and change limits.", "u(0)=1, u(2)=5, so ∫_1^5 1/u du=ln 5.", 1450),
+    mission(10, "VTL Chooses u for x ln x", "VTL remembers LIATE before the parkour wall gets taller.", "Find ∫ x ln(x) dx.", "Integration by parts", 100, [choice("a", "Vector Wall", "(x^2/2)ln x - x^2/4 + C", true, colors[0]), choice("b", "Log Lift", "x ln x - x + C", false, colors[1]), choice("c", "Parkour Rail", "(x^2/2)ln x + x^2/4 + C", false, colors[2]), choice("d", "Tower Grip", "x^2 ln x + C", false, colors[3])], "Let u=ln x and dv=x dx.", "uv-∫vdu=(x^2/2)ln x-∫(x^2/2)(1/x)dx=(x^2/2)ln x-x^2/4+C.", 1650),
+    mission(11, "Anikshaa's Definite Parts Firework", "Anikshaa times a firework height using a definite integration by parts result.", "Evaluate ∫ from 0 to 1 of x e^(2x) dx.", "Definite integration by parts Hard", 110, [choice("a", "Firework A", "(e^2+1)/4", true, colors[0]), choice("b", "Firework B", "(e^2-1)/4", false, colors[1]), choice("c", "Firework C", "e^2/2", false, colors[2]), choice("d", "Firework D", "e^2+1", false, colors[3])], "Integrate by parts or use ∫xe^(2x)dx=e^(2x)(x/2-1/4).", "[e^(2x)(x/2-1/4)]_0^1=e^2/4+1/4=(e^2+1)/4.", 1800),
+    mission(12, "Joy Opens the Partial Fraction Castle", "Joy splits the locked castle fraction into two simpler doors.", "Find ∫ 5/(x^2-4) dx.", "Partial fractions", 105, [choice("a", "Door A", "(5/4)ln|(x-2)/(x+2)|+C", true, colors[0]), choice("b", "Door B", "5ln|x^2-4|+C", false, colors[1]), choice("c", "Door C", "(5/2)ln|x-2|+C", false, colors[2]), choice("d", "Door D", "5/(2x)+C", false, colors[3])], "Factor x^2-4=(x-2)(x+2).", "5/[(x-2)(x+2)]=5/4·1/(x-2)-5/4·1/(x+2).", 1750),
+    mission(13, "Saharsh and Divyam Decode Pirates' Fractions", "Saharsh and Divyam split a treasure map before the next climb loop.", "Decompose and integrate ∫ (3x+5)/(x^2+x-2) dx.", "Partial fractions Hard", 120, [choice("a", "Pirates", "(8/3)ln|x-1|+(1/3)ln|x+2|+C", true, colors[0]), choice("b", "Cove", "3ln|x^2+x-2|+C", false, colors[1]), choice("c", "Dock", "(1/3)ln|x-1|+(8/3)ln|x+2|+C", false, colors[2]), choice("d", "Lagoon", "8ln|x-1|+ln|x+2|+C", false, colors[3])], "Use (x+2)(x-1) and solve A/(x-1)+B/(x+2).", "A+B=3 and 2A-B=5, so A=8/3, B=1/3.", 2000),
+    mission(14, "VTL Checks the Infinite Monorail", "VTL tests whether the infinite track has finite total length.", "Does ∫ from 1 to infinity of 1/x^(3/2) dx converge, and what is its value?", "Improper integral BC", 100, [choice("a", "Monorail", "Converges to 2", true, colors[0]), choice("b", "Express", "Converges to 1", false, colors[1]), choice("c", "Station", "Diverges", false, colors[2]), choice("d", "Loop", "Converges to 3/2", false, colors[3])], "p-integral with p=3/2>1 converges.", "∫_1^b x^(-3/2)dx=[-2x^(-1/2)]_1^b. Limit as b→∞ gives 2.", 1750),
+    mission(15, "Joy Spots the Divergent Log Tunnel", "Joy refuses the tunnel because the log grows too slowly.", "Determine whether ∫ from 2 to infinity of 1/(x ln x) dx converges.", "Improper integral BC", 95, [choice("a", "Tunnel A", "Converges to ln 2", false, colors[0]), choice("b", "Tunnel B", "Converges to 1/ln 2", false, colors[1]), choice("c", "Tunnel C", "Diverges", true, colors[2]), choice("d", "Tunnel D", "Converges to 0", false, colors[3])], "Use u=ln x. The integral becomes ∫du/u.", "∫_2^b 1/(xlnx)dx=ln(ln b)-ln(ln2), which grows without bound.", 1750),
+    mission(16, "Anikshaa's Trig Fountain", "Anikshaa saves one sine factor and lets u do the climbing.", "Find ∫ sin^3(x)cos(x) dx.", "Trig substitution", 80, [choice("a", "Fountain", "sin^4(x)/4+C", true, colors[0]), choice("b", "Splash", "cos^4(x)/4+C", false, colors[1]), choice("c", "Wave", "-sin^4(x)/4+C", false, colors[2]), choice("d", "Lagoon", "3sin^2(x)+C", false, colors[3])], "Let u=sin x.", "∫sin^3x cosx dx=∫u^3du=u^4/4+C.", 1400),
+    mission(17, "Divyam's Secant Speed Ramp", "Divyam knows the derivative of tangent unlocks the ramp.", "Find ∫ sec^2(3x) dx.", "Trig integral", 70, [choice("a", "Ramp A", "tan(3x)+C", false, colors[0]), choice("b", "Ramp B", "(1/3)tan(3x)+C", true, colors[1]), choice("c", "Ramp C", "3tan(3x)+C", false, colors[2]), choice("d", "Ramp D", "-(1/3)cot(3x)+C", false, colors[3])], "Account for the inside derivative 3.", "Let u=3x. dx=du/3, so the integral is (1/3)tan(3x)+C.", 1250),
+    mission(18, "Saharsh Finds the Area Between Lands", "Saharsh compares two ride paths to find the space between them.", "Find the area between y=4-x^2 and y=x+2.", "Area between curves Hard", 115, [choice("a", "Adventureland", "3", false, colors[0]), choice("b", "Fantasyland", "9/2", true, colors[1]), choice("c", "Tomorrowland", "6", false, colors[2]), choice("d", "Frontierland", "27/2", false, colors[3])], "Find intersections and integrate top minus bottom.", "4-x^2=x+2 gives x=-2,1. Area=∫_-2^1(2-x-x^2)dx=9/2.", 1900),
+    mission(19, "VTL Spins the Washer Castle", "VTL rotates a region around the x-axis to build a tower level.", "The region under y=√x from x=0 to x=4 is rotated about the x-axis. What is the volume?", "Washer volume", 95, [choice("a", "Washer A", "4π", false, colors[0]), choice("b", "Washer B", "8π", true, colors[1]), choice("c", "Washer C", "16π", false, colors[2]), choice("d", "Washer D", "32π", false, colors[3])], "Use V=π∫R^2 dx.", "R=√x, so V=π∫_0^4 x dx=π[x^2/2]_0^4=8π.", 1600),
+    mission(20, "Joy Builds the Shell Spiral", "Joy uses cylindrical shells to make the climb wrap around the castle.", "The region under y=x from x=0 to x=3 is rotated about the y-axis. What is the volume?", "Shell volume", 95, [choice("a", "Shell A", "9π", false, colors[0]), choice("b", "Shell B", "18π", true, colors[1]), choice("c", "Shell C", "27π", false, colors[2]), choice("d", "Shell D", "6π", false, colors[3])], "Use shells: 2π∫ radius·height dx.", "V=2π∫_0^3 x·x dx=2π[x^3/3]_0^3=18π.", 1600),
+    mission(21, "Anikshaa Averages the Festival Lights", "Anikshaa needs one average brightness for the whole interval.", "Find the average value of f(x)=ln x on [1,e].", "Average value", 95, [choice("a", "Lights A", "1/(e-1)", true, colors[0]), choice("b", "Lights B", "1", false, colors[1]), choice("c", "Lights C", "e-1", false, colors[2]), choice("d", "Lights D", "ln(e-1)", false, colors[3])], "Average value is (1/(b-a))∫_a^b f(x)dx.", "∫_1^e ln x dx=[xlnx-x]_1^e=1, so average=1/(e-1).", 1600),
+    mission(22, "Divyam Solves the Parameter Gate", "Divyam chooses the positive parameter that opens the next loop.", "If ∫ from 0 to a of 2x dx=9 and a>0, what is a?", "Integral with parameter", 80, [choice("a", "Gate A", "2", false, colors[0]), choice("b", "Gate B", "3", true, colors[1]), choice("c", "Gate C", "6", false, colors[2]), choice("d", "Gate D", "9", false, colors[3])], "Evaluate the integral as a function of a.", "∫_0^a 2x dx=a^2. Since a^2=9 and a>0, a=3.", 1500),
+    mission(23, "VTL Repairs the Parameter Gate", "The VTL control panel corrects the previous trap and asks for the exact value.", "If ∫ from 0 to a of 2x dx=18 and a>0, what is a?", "Integral with parameter Hard", 90, [choice("a", "Control A", "3", false, colors[0]), choice("b", "Control B", "3√2", true, colors[1]), choice("c", "Control C", "9", false, colors[2]), choice("d", "Control D", "18", false, colors[3])], "The integral equals a^2, so solve a^2=18.", "a=√18=3√2 because a is positive.", 1650),
+    mission(24, "Saharsh's Sum Antiderivative Sprint", "Saharsh combines power, log, and exponential pieces in one sprint.", "Find ∫(6x^2 - 4/x + e^x) dx.", "Antiderivative of sum", 80, [choice("a", "Sprint A", "2x^3-4ln|x|+e^x+C", true, colors[0]), choice("b", "Sprint B", "18x-4ln|x|+e^x+C", false, colors[1]), choice("c", "Sprint C", "2x^3-4/x^2+e^x+C", false, colors[2]), choice("d", "Sprint D", "6x^3-4ln|x|+e^x+C", false, colors[3])], "Integrate term by term.", "∫6x^2dx=2x^3, ∫-4/x dx=-4ln|x|, and ∫e^x dx=e^x.", 1350),
+    mission(25, "Joy's Trig Definite Shortcut", "Joy uses one clean substitution instead of expanding everything.", "Evaluate ∫ from 0 to π/2 of sin x cos^3 x dx.", "Definite trig integral", 100, [choice("a", "Shortcut A", "1/4", true, colors[0]), choice("b", "Shortcut B", "1/2", false, colors[1]), choice("c", "Shortcut C", "3/4", false, colors[2]), choice("d", "Shortcut D", "1", false, colors[3])], "Let u=cos x or u=sin x carefully with bounds.", "Using u=cos x, du=-sinx dx, bounds 1 to 0, so ∫_0^1 u^3du=1/4.", 1650),
+    mission(26, "Anikshaa's Repeating Fraction Ladder", "Anikshaa climbs a simple partial fraction ladder.", "Find ∫ 1/(x(x+1)) dx.", "Partial fractions", 85, [choice("a", "Ladder A", "ln|x|-ln|x+1|+C", true, colors[0]), choice("b", "Ladder B", "ln|x(x+1)|+C", false, colors[1]), choice("c", "Ladder C", "1/x-ln|x+1|+C", false, colors[2]), choice("d", "Ladder D", "-1/(x+1)+C", false, colors[3])], "Decompose 1/(x(x+1))=1/x-1/(x+1).", "Integrate to get ln|x|-ln|x+1|+C.", 1500),
+    mission(27, "Divyam Handles Parts Twice", "Divyam loops through integration by parts twice before the tower resets.", "Find ∫ e^x sin x dx.", "Integration by parts twice BC", 125, [choice("a", "Loop A", "(e^x/2)(sin x - cos x)+C", true, colors[0]), choice("b", "Loop B", "e^x(sin x + cos x)+C", false, colors[1]), choice("c", "Loop C", "(e^x/2)(sin x + cos x)+C", false, colors[2]), choice("d", "Loop D", "-(e^x/2)(sin x - cos x)+C", false, colors[3])], "This is the classic repeat-by-parts integral.", "Let I=∫e^x sinx dx. After two parts, 2I=e^x sinx-e^x cosx, so I=(e^x/2)(sinx-cosx)+C.", 2100),
+    mission(28, "VTL Approximates Joy's Crowd Count", "VTL estimates total guests from Joy's rate table.", "Joy's guest-entry rate r(t) is 4,7,3,11 at t=0,2,5,9. What trapezoidal approximation estimates ∫ from 0 to 9 of r(t)dt?", "Unequal trapezoids Hard", 105, [choice("a", "Crowd A", "32", false, colors[0]), choice("b", "Crowd B", "43", false, colors[1]), choice("c", "Crowd C", "54", true, colors[2]), choice("d", "Crowd D", "72", false, colors[3])], "Use a different width for each subinterval.", "2/2(4+7)+3/2(7+3)+4/2(3+11)=11+15+28=54.", 1750),
+    mission(29, "Saharsh Chains the Castle Integral", "Saharsh climbs faster when he catches both the FTC and chain rule.", "If F(x)=∫ from 1 to x^3 of √(1+t^2) dt, find F'(x).", "FTC with chain rule BC", 95, [choice("a", "Chain A", "√(1+x^6)", false, colors[0]), choice("b", "Chain B", "3x^2√(1+x^6)", true, colors[1]), choice("c", "Chain C", "3x^2√(1+x^2)", false, colors[2]), choice("d", "Chain D", "x^3√(1+x^6)", false, colors[3])], "The upper limit is x^3, so multiply by its derivative.", "F'(x)=√(1+(x^3)^2)·3x^2=3x^2√(1+x^6).", 1700),
+    mission(30, "Triple T Final Method Choice",
+      "Anikshaa, Joy, Saharsh, Divyam, and VTL reach the final tower and must choose the fastest method.",
+      "Which method is most direct for ∫(x^2+1)/(x^3+3x) dx?",
+      "Technique selection BC",
+      90,
+      [
+        choice("a", "Finale A", "u-substitution with u=x^3+3x", true, colors[0]),
+        choice("b", "Finale B", "Integration by parts", false, colors[1]),
+        choice("c", "Finale C", "Trigonometric identity", false, colors[2]),
+        choice("d", "Finale D", "Washer method", false, colors[3])
       ],
-      explanation: "Use the antiderivative -1/x and take a limit as b goes to infinity.",
-      workedSolution: "lim b→∞ ∫_1^b x^-2 dx = lim b→∞ [-1/x]_1^b = lim b→∞ (-1/b + 1) = 1."
-    },
-    {
-      id: "triple-i-7",
-      title: "Mickey's Monorail Average",
-      story: "Mickey needs the average track height to keep the monorail challenge moving.",
-      prompt: "Find the average value of f(x)=x^2 on [0, 3].",
-      difficulty: "Average value",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Monorail", text: "3", color: "#3a86ff", correct: true },
-        { id: "b", park: "Grand Floridian", text: "6", color: "#ffbe0b" },
-        { id: "c", park: "Contemporary", text: "9", color: "#8338ec" },
-        { id: "d", park: "Polynesian", text: "1", color: "#06d6a0" }
-      ],
-      explanation: "Average value is 1/(b-a) times the definite integral.",
-      workedSolution: "Average = (1/3)∫_0^3 x^2 dx = (1/3)[x^3/3]_0^3 = (1/3)(9) = 3."
-    },
-    {
-      id: "triple-i-8",
-      title: "Minnie Unlocks the Haunted Trig Gate",
-      story: "The hallway stretches, but a clean trig antiderivative opens the door.",
-      prompt: "Evaluate ∫ sin(3x) dx.",
-      difficulty: "Trig integration",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Haunted Mansion", text: "-cos(3x)/3 + C", color: "#6d597a", correct: true },
-        { id: "b", park: "Liberty Square", text: "cos(3x)/3 + C", color: "#355070" },
-        { id: "c", park: "Stretching Room", text: "-3cos(3x) + C", color: "#b56576" },
-        { id: "d", park: "Ghost Host", text: "3sin(3x) + C", color: "#e56b6f" }
-      ],
-      explanation: "The derivative of cos(3x) is -3sin(3x), so divide by 3 and use the negative sign.",
-      workedSolution: "∫sin(3x)dx = -cos(3x)/3 + C."
-    },
-    {
-      id: "triple-i-9",
-      title: "Donald Launches Space Mountain",
-      story: "Donald checks total displacement before the rocket coaster blasts off.",
-      prompt: "Evaluate ∫ from 0 to 2 of 6t^2 dt.",
-      difficulty: "Motion from velocity",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Space Mountain", text: "16", color: "#0b132b", correct: true },
-        { id: "b", park: "Tomorrowland", text: "12", color: "#1c2541" },
-        { id: "c", park: "Launch Bay", text: "24", color: "#3a506b" },
-        { id: "d", park: "Astro Orbiter", text: "8", color: "#5bc0be" }
-      ],
-      explanation: "Integrate velocity to get displacement.",
-      workedSolution: "∫_0^2 6t^2 dt = [2t^3]_0^2 = 16."
-    },
-    {
-      id: "triple-i-10",
-      title: "Goofy Lights the Chain-Rule Castle",
-      story: "Goofy follows the inside function to light up the castle in one move.",
-      prompt: "Evaluate ∫ cos(x) e^{sin(x)} dx.",
-      difficulty: "u-substitution",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Castle Lights", text: "e^{sin(x)} + C", color: "#4361ee", correct: true },
-        { id: "b", park: "Main Street", text: "e^{cos(x)} + C", color: "#f72585" },
-        { id: "c", park: "Fireworks", text: "cos(x)e^{sin(x)} + C", color: "#ffbe0b" },
-        { id: "d", park: "Dream Suite", text: "sin(x)e^{cos(x)} + C", color: "#7209b7" }
-      ],
-      explanation: "Let u = sin(x), so du = cos(x) dx.",
-      workedSolution: "∫cos(x)e^{sin(x)}dx = ∫e^u du = e^u + C = e^{sin(x)} + C."
-    },
-    {
-      id: "triple-i-11",
-      title: "Mickey's Jungle Log Cruise",
-      story: "Mickey spots a reciprocal expression hiding behind the vines.",
-      prompt: "Evaluate ∫ 1/(x + 4) dx.",
-      difficulty: "Log integrals",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Jungle Cruise", text: "ln|x + 4| + C", color: "#2d6a4f", correct: true },
-        { id: "b", park: "Trader Sam", text: "1/ln|x + 4| + C", color: "#40916c" },
-        { id: "c", park: "River Bend", text: "ln|x| + 4 + C", color: "#52b788" },
-        { id: "d", park: "Vine Dock", text: "(x + 4)^2/2 + C", color: "#95d5b2" }
-      ],
-      explanation: "The integral of 1/u is ln|u|, and u=x+4 has derivative 1.",
-      workedSolution: "∫1/(x+4)dx = ln|x+4| + C."
-    },
-    {
-      id: "triple-i-12",
-      title: "Minnie Opens the Accumulation Vault",
-      story: "Minnie turns a snowfall rate into a total amount for the ice-palace scoreboard.",
-      prompt: "If snow falls at r(t)=3t^2 inches/hour, how much snow falls from t=0 to t=2?",
-      difficulty: "Accumulated change",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Arendelle", text: "8 inches", color: "#48cae4", correct: true },
-        { id: "b", park: "Ice Palace", text: "12 inches", color: "#00b4d8" },
-        { id: "c", park: "North Mountain", text: "4 inches", color: "#0077b6" },
-        { id: "d", park: "Snow Vault", text: "6 inches", color: "#03045e" }
-      ],
-      explanation: "Total accumulation is the integral of the rate.",
-      workedSolution: "∫_0^2 3t^2 dt = [t^3]_0^2 = 8 inches."
-    },
-    {
-      id: "triple-i-13",
-      title: "Donald Rides Big Thunder Net Change",
-      story: "Donald tracks signed gains and drops as the mine train races through Triple T.",
-      prompt: "If h'(t)=4t-6, find h(3)-h(0).",
-      difficulty: "Net change theorem",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Big Thunder", text: "0", color: "#bc6c25", correct: true },
-        { id: "b", park: "Mine Shaft", text: "6", color: "#dda15e" },
-        { id: "c", park: "Frontierland", text: "-6", color: "#606c38" },
-        { id: "d", park: "Gold Dust", text: "12", color: "#fefae0" }
-      ],
-      explanation: "Net change is the integral of the derivative.",
-      workedSolution: "h(3)-h(0)=∫_0^3(4t-6)dt=[2t^2-6t]_0^3=18-18=0."
-    },
-    {
-      id: "triple-i-14",
-      title: "Goofy Sorts the Toy Box by Parts",
-      story: "Goofy organizes the product into u and dv pieces before the toy timer buzzes.",
-      prompt: "Evaluate ∫ x cos(x) dx.",
-      difficulty: "Integration by parts",
-      timeLimitSeconds: 50,
-      choices: [
-        { id: "a", park: "Toy Story Land", text: "x sin(x) + cos(x) + C", color: "#fb8500", correct: true },
-        { id: "b", park: "Slinky Dog", text: "x sin(x) - cos(x) + C", color: "#ffb703" },
-        { id: "c", park: "Alien Swirls", text: "sin(x) + xcos(x) + C", color: "#219ebc" },
-        { id: "d", park: "Roundup Rodeo", text: "xcos(x) - sin(x) + C", color: "#8ecae6" }
-      ],
-      explanation: "Let u=x and dv=cos(x)dx. Then v=sin(x).",
-      workedSolution: "∫xcos(x)dx = xsin(x)-∫sin(x)dx = xsin(x)+cos(x)+C."
-    },
-    {
-      id: "triple-i-15",
-      title: "Mickey Scans Pandora's Definite Integral",
-      story: "Mickey turns a long limit-of-sums scan into one clean park mission.",
-      prompt: "Which integral matches lim n→∞ Σ from i=1 to n of (3(x_i*)^2 + 1)Δx on [0,4]?",
-      difficulty: "Definite integral notation",
-      timeLimitSeconds: 55,
-      choices: [
-        { id: "a", park: "Pandora", text: "∫ from 0 to 4 of (3x^2+1) dx", color: "#2a9d8f", correct: true },
-        { id: "b", park: "Flight Passage", text: "∫ from 1 to n of (3x^2+1) dx", color: "#264653" },
-        { id: "c", park: "Floating Valley", text: "Σ from 0 to 4 of (3x^2+1) dx", color: "#e9c46a" },
-        { id: "d", park: "Navi River", text: "∫ from 0 to 4 of (3x+1) dx", color: "#e76f51" }
-      ],
-      explanation: "A Riemann sum limit becomes a definite integral over the same interval.",
-      workedSolution: "The function is 3x^2+1 and the interval is [0,4], so the integral is ∫_0^4(3x^2+1)dx."
-    },
-    {
-      id: "triple-i-16",
-      title: "Minnie Tests the Fireworks p-Integral",
-      story: "Minnie checks whether an infinite sparkle trail has a finite total glow.",
-      prompt: "Does ∫ from 1 to infinity of 1/x^(3/2) dx converge?",
-      difficulty: "Improper p-integral",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Final Fireworks", text: "Converges because p=3/2>1", color: "#f94144", correct: true },
-        { id: "b", park: "Castle Finale", text: "Diverges because p=3/2>1", color: "#f3722c" },
-        { id: "c", park: "Night Show", text: "Converges because p<1", color: "#f9c74f" },
-        { id: "d", park: "Wish Star", text: "Diverges because p=1", color: "#90be6d" }
-      ],
-      explanation: "For ∫_1^∞ 1/x^p dx, the integral converges when p>1.",
-      workedSolution: "Here p=3/2, which is greater than 1, so the improper integral converges."
-    },
-    {
-      id: "triple-i-17",
-      title: "Daisy Counts the Main Street Left Sum",
-      story: "Daisy estimates crowd flow before the Triple T parade reaches the castle.",
-      prompt: "For f(0)=2, f(1)=5, f(2)=9, f(3)=10, use a left Riemann sum with Δx=1 on [0,3].",
-      difficulty: "Left Riemann sum",
-      timeLimitSeconds: 40,
-      choices: [
-        { id: "a", park: "Main Street", text: "16", color: "#ef476f", correct: true },
-        { id: "b", park: "Town Square", text: "24", color: "#ffd166" },
-        { id: "c", park: "Emporium", text: "26", color: "#3f7cff" },
-        { id: "d", park: "Parade Route", text: "21", color: "#43aa8b" }
-      ],
-      explanation: "A left sum uses the left endpoints 0, 1, and 2.",
-      workedSolution: "L3 = 1[f(0)+f(1)+f(2)] = 2+5+9 = 16."
-    },
-    {
-      id: "triple-i-18",
-      title: "Donald Drives the EPCOT Trapezoid Track",
-      story: "Donald upgrades the estimate from rectangle mode to trapezoid mode.",
-      prompt: "Use the trapezoidal rule with Δx=2 for f(0)=1, f(2)=4, f(4)=7.",
-      difficulty: "Trapezoidal sum",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "EPCOT", text: "16", color: "#277da1", correct: true },
-        { id: "b", park: "Imagination", text: "12", color: "#8338ec" },
-        { id: "c", park: "World Showcase", text: "20", color: "#f9844a" },
-        { id: "d", park: "Spaceship Earth", text: "24", color: "#06d6a0" }
-      ],
-      explanation: "Trapezoidal rule uses Δx/2 times first + twice middle + last.",
-      workedSolution: "T = (2/2)[1 + 2(4) + 7] = 16."
-    },
-    {
-      id: "triple-i-19",
-      title: "Mickey's Antiderivative Match-Up",
-      story: "Mickey matches the derivative clue to the right family of functions.",
-      prompt: "Find ∫(8x^3 - 6x) dx.",
-      difficulty: "Indefinite integrals",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Mickey's Math", text: "2x^4 - 3x^2 + C", color: "#ffd166", correct: true },
-        { id: "b", park: "Clubhouse", text: "24x^2 - 6 + C", color: "#f94144" },
-        { id: "c", park: "Mouse Gear", text: "8x^4 - 6x^2 + C", color: "#3a86ff" },
-        { id: "d", park: "Steamboat", text: "2x^4 - 6x + C", color: "#43aa8b" }
-      ],
-      explanation: "Use the power rule for antiderivatives.",
-      workedSolution: "∫8x^3dx=2x^4 and ∫-6xdx=-3x^2, so 2x^4-3x^2+C."
-    },
-    {
-      id: "triple-i-20",
-      title: "Minnie Opens the Fantasyland FTC Portal",
-      story: "Minnie uses the FTC to unlock an accumulation-function portal.",
-      prompt: "If G(x)=∫ from 2 to x of √(t^2+1) dt, find G'(x).",
-      difficulty: "FTC Part 1",
-      timeLimitSeconds: 40,
-      choices: [
-        { id: "a", park: "Fantasyland", text: "√(x^2+1)", color: "#7209b7", correct: true },
-        { id: "b", park: "Castle Portal", text: "√(t^2+1)", color: "#f72585" },
-        { id: "c", park: "Storybook", text: "2x/√(x^2+1)", color: "#4cc9f0" },
-        { id: "d", park: "Carousel", text: "0", color: "#b5179e" }
-      ],
-      explanation: "By FTC Part 1, d/dx of ∫_a^x f(t)dt is f(x).",
-      workedSolution: "G'(x)=√(x^2+1)."
-    },
-    {
-      id: "triple-i-21",
-      title: "Goofy Chases the Chain FTC Portal",
-      story: "Goofy changes the upper limit, so the chain rule joins the ride.",
-      prompt: "If H(x)=∫ from 1 to x^2 of cos(t) dt, find H'(x).",
-      difficulty: "FTC with chain rule",
-      timeLimitSeconds: 50,
-      choices: [
-        { id: "a", park: "Wonderland", text: "2x cos(x^2)", color: "#ff006e", correct: true },
-        { id: "b", park: "Tea Cups", text: "cos(x^2)", color: "#8338ec" },
-        { id: "c", park: "Queen's Garden", text: "-2x sin(x^2)", color: "#3a86ff" },
-        { id: "d", park: "Rabbit Hole", text: "x^2 cos(x)", color: "#ffbe0b" }
-      ],
-      explanation: "Use FTC Part 1 and multiply by the derivative of x^2.",
-      workedSolution: "H'(x)=cos(x^2)·2x = 2xcos(x^2)."
-    },
-    {
-      id: "triple-i-22",
-      title: "Daisy Casts the Integral Property Spell",
-      story: "Daisy combines integral pieces before the castle clock hits midnight.",
-      prompt: "If ∫_1^4 f(x)dx=9 and ∫_1^2 f(x)dx=3, find ∫_2^4 f(x)dx.",
-      difficulty: "Integral properties",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Cinderella Castle", text: "6", color: "#4361ee", correct: true },
-        { id: "b", park: "Glass Coach", text: "12", color: "#ffd166" },
-        { id: "c", park: "Midnight", text: "3", color: "#ef476f" },
-        { id: "d", park: "Ballroom", text: "9", color: "#43aa8b" }
-      ],
-      explanation: "Break the larger integral into adjacent intervals.",
-      workedSolution: "∫_1^4 f = ∫_1^2 f + ∫_2^4 f, so 9 = 3 + unknown. Unknown = 6."
-    },
-    {
-      id: "triple-i-23",
-      title: "Mickey Flips the Magic Carpet Bounds",
-      story: "Mickey notices the carpet is flying backward across the interval.",
-      prompt: "If ∫_0^5 f(x)dx=14, what is ∫_5^0 f(x)dx?",
-      difficulty: "Integral properties",
-      timeLimitSeconds: 30,
-      choices: [
-        { id: "a", park: "Agrabah", text: "-14", color: "#e76f51", correct: true },
-        { id: "b", park: "Cave of Wonders", text: "14", color: "#f4a261" },
-        { id: "c", park: "Magic Carpet", text: "0", color: "#2a9d8f" },
-        { id: "d", park: "Palace", text: "1/14", color: "#264653" }
-      ],
-      explanation: "Reversing bounds changes the sign of a definite integral.",
-      workedSolution: "∫_5^0 f(x)dx = -∫_0^5 f(x)dx = -14."
-    },
-    {
-      id: "triple-i-24",
-      title: "Minnie Sails Through Completing the Square",
-      story: "Minnie rewrites the denominator before sailing into arctangent waters.",
-      prompt: "Evaluate ∫ 1/(x^2 + 4x + 8) dx.",
-      difficulty: "Completing the square",
-      timeLimitSeconds: 65,
-      choices: [
-        { id: "a", park: "Motunui", text: "1/2 arctan((x+2)/2) + C", color: "#00b4d8", correct: true },
-        { id: "b", park: "Voyage", text: "2 arctan((x+2)/2) + C", color: "#0077b6" },
-        { id: "c", park: "Ocean Wayfinder", text: "ln|x^2+4x+8| + C", color: "#48cae4" },
-        { id: "d", park: "Te Fiti", text: "arctan(x+2) + C", color: "#90e0ef" }
-      ],
-      explanation: "Complete the square: x^2+4x+8=(x+2)^2+4.",
-      workedSolution: "∫1/((x+2)^2+2^2)dx = (1/2)arctan((x+2)/2)+C."
-    },
-    {
-      id: "triple-i-25",
-      title: "Donald Does the Long Division Dash",
-      story: "Donald simplifies the rational function before sprinting to the integral.",
-      prompt: "Simplify then integrate ∫ (x^2+1)/x dx.",
-      difficulty: "Long division/algebra",
-      timeLimitSeconds: 45,
-      choices: [
-        { id: "a", park: "Metroville", text: "x^2/2 + ln|x| + C", color: "#d00000", correct: true },
-        { id: "b", park: "Incredicoaster", text: "x + ln|x| + C", color: "#ffba08" },
-        { id: "c", park: "Syndrome Base", text: "x^3/3 + x + C", color: "#3f88c5" },
-        { id: "d", park: "Dash Track", text: "ln|x^2+1| + C", color: "#032b43" }
-      ],
-      explanation: "(x^2+1)/x = x + 1/x.",
-      workedSolution: "∫(x+1/x)dx = x^2/2 + ln|x| + C."
-    },
-    {
-      id: "triple-i-26",
-      title: "Goofy Finds the Recipe Substitution",
-      story: "Goofy notices the derivative ingredient already appears in the recipe.",
-      prompt: "Evaluate ∫ (6x+2)(3x^2+2x-1)^5 dx.",
-      difficulty: "u-substitution",
-      timeLimitSeconds: 55,
-      choices: [
-        { id: "a", park: "Paris Kitchen", text: "(3x^2+2x-1)^6/6 + C", color: "#6a994e", correct: true },
-        { id: "b", park: "Gusteau's", text: "(3x^2+2x-1)^6 + C", color: "#a7c957" },
-        { id: "c", park: "Little Chef", text: "6(3x^2+2x-1)^4 + C", color: "#bc4749" },
-        { id: "d", park: "Recipe Book", text: "(6x+2)^6/6 + C", color: "#386641" }
-      ],
-      explanation: "Let u=3x^2+2x-1, so du=(6x+2)dx.",
-      workedSolution: "∫u^5du = u^6/6 + C = (3x^2+2x-1)^6/6 + C."
-    },
-    {
-      id: "triple-i-27",
-      title: "Mickey Checks the Exponential Pride Rock",
-      story: "Mickey checks the growth curve before the Pride Rock scoreboard updates.",
-      prompt: "Evaluate ∫ from 0 to ln(3) of e^x dx.",
-      difficulty: "Definite exponential integral",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Pride Rock", text: "2", color: "#bc6c25", correct: true },
-        { id: "b", park: "Savanna", text: "3", color: "#dda15e" },
-        { id: "c", park: "Circle of Life", text: "ln(3)", color: "#606c38" },
-        { id: "d", park: "Sunrise", text: "1", color: "#fefae0" }
-      ],
-      explanation: "The antiderivative of e^x is e^x.",
-      workedSolution: "∫_0^ln3 e^x dx = [e^x]_0^ln3 = 3-1 = 2."
-    },
-    {
-      id: "triple-i-28",
-      title: "Daisy Splashes Through Signed Area",
-      story: "Daisy watches the rate dip below the axis, so signed area matters.",
-      prompt: "If ∫_0^2 f(x)dx=5 and ∫_2^6 f(x)dx=-8, find ∫_0^6 f(x)dx.",
-      difficulty: "Signed accumulation",
-      timeLimitSeconds: 35,
-      choices: [
-        { id: "a", park: "Splash Falls", text: "-3", color: "#118ab2", correct: true },
-        { id: "b", park: "River Drop", text: "13", color: "#06d6a0" },
-        { id: "c", park: "Laughing Place", text: "3", color: "#ffd166" },
-        { id: "d", park: "Water Path", text: "-13", color: "#ef476f" }
-      ],
-      explanation: "Add signed integrals across adjacent intervals.",
-      workedSolution: "∫_0^6 f = ∫_0^2 f + ∫_2^6 f = 5 + (-8) = -3."
-    },
-    {
-      id: "triple-i-29",
-      title: "Donald Opens the Star Tours Improper Gate",
-      story: "Donald checks the launch path where the graph has a vertical asymptote.",
-      prompt: "Does ∫ from 0 to 1 of 1/√x dx converge, and what is its value?",
-      difficulty: "Improper integral",
-      timeLimitSeconds: 55,
-      choices: [
-        { id: "a", park: "Star Tours", text: "Converges to 2", color: "#3a0ca3", correct: true },
-        { id: "b", park: "Galaxy Port", text: "Converges to 1", color: "#4361ee" },
-        { id: "c", park: "Hyperspace", text: "Diverges", color: "#4cc9f0" },
-        { id: "d", park: "Droid Depot", text: "Converges to 1/2", color: "#7209b7" }
-      ],
-      explanation: "Rewrite 1/√x as x^(-1/2) and use a limit at 0.",
-      workedSolution: "lim a→0+ ∫_a^1 x^(-1/2)dx = lim a→0+ [2√x]_a^1 = 2."
-    },
-    {
-      id: "triple-i-30",
-      title: "Triple T Happily Ever After Master Mix",
-      story: "The final show asks you to choose the best integration strategy for the win.",
-      prompt: "Which method is most direct for ∫ x/(x^2+9) dx?",
-      difficulty: "Technique selection",
-      timeLimitSeconds: 40,
-      choices: [
-        { id: "a", park: "Happily Ever After", text: "u-substitution with u=x^2+9", color: "#f94144", correct: true },
-        { id: "b", park: "Castle Finale", text: "Integration by parts", color: "#f3722c" },
-        { id: "c", park: "Firework Bridge", text: "Partial fractions", color: "#f9c74f" },
-        { id: "d", park: "Wish Star", text: "Trapezoidal rule", color: "#90be6d" }
-      ],
-      explanation: "The numerator x is part of the derivative of x^2+9.",
-      workedSolution: "Let u=x^2+9, so du=2x dx. The integral becomes (1/2)ln(x^2+9)+C."
-    }
+      "The numerator is one-third of the derivative of the denominator.",
+      "du=(3x^2+3)dx=3(x^2+1)dx, so the integral is (1/3)ln|x^3+3x|+C.",
+      1900
+    )
   ]
 };
