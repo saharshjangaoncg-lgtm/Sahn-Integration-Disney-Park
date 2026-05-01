@@ -39,10 +39,13 @@ The exact URL depends on whether the name is available on the hosting service.
 - 30-question harder Disney-themed AP Calculus BC Unit 6 quiz.
 - Live multiplayer host/player interface.
 - Avatar selection before joining a live room.
+- 30 selectable climber avatars split into class crew and Disney-inspired character crew.
+- Avatar locking so two players cannot take the same climber in one room.
 - Clickable park-course selection before hosting.
+- Host-set overall park timer plus each question's own internal timer.
 - Spendable point bank: answering questions earns points, and players spend points to climb.
 - Base points, speed bonus, streak bonus, power moves, climb height, turns, and final award badges.
-- 3D infinite parkour tower where players choose left, forward, or right climbs and the course loops every 900 feet.
+- 3D parkour route where players choose left, forward, or right, can also use keyboard controls, and fall back to 0 height if they miss the required obstacle lane.
 - Web-based Unit 6 slide lesson page.
 - Editable PowerPoint slide deck:
 
@@ -265,6 +268,8 @@ Scoring:
 - Three-question streak: badge bonus.
 - Players spend 300 point-bank points to climb 24 feet.
 - Left, forward, and right climb buttons all spend points and change the player's route through the 3D tower.
+- Keyboard climbing also works for players: left/right movement and the space bar/forward jump trigger climb attempts.
+- Missing the required obstacle lane spends the points and resets that player's height to 0.
 - The 3D tower loops after 900 feet, so a player can keep climbing into Loop 2, Loop 3, and beyond.
 
 Power moves happen on the results screen:

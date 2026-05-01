@@ -12,6 +12,11 @@ const state = {
   roomCode: localStorage.getItem("quizRoomCode") || "",
   selectedAvatar: localStorage.getItem("quizAvatar") || "mickey",
   selectedPark: localStorage.getItem("quizParkTheme") || "castle",
+  gameDurationMinutes: Number(localStorage.getItem("quizGameDurationMinutes") || 20),
+  previewRoom: null,
+  previewCode: "",
+  joinName: "",
+  dragAvatar: "",
   answeredChoiceId: "",
   error: "",
   events: null,
@@ -20,8 +25,8 @@ const state = {
 
 setInterval(() => {
   state.now = Date.now();
-  if (state.room?.status === "answering") render();
-}, 500);
+  if (state.room?.status === "answering" || state.room?.gameEndsAt) render();
+}, 1000);
 
 async function api(path, payload) {
   const response = await fetch(path, {
@@ -35,6 +40,11 @@ async function api(path, payload) {
 async function loadDeck() {
   const response = await fetch("/api/deck");
   state.deck = await response.json();
+}
+
+async function getJson(path) {
+  const response = await fetch(path);
+  return response.json();
 }
 
 function connectEvents(roomCode) {
@@ -77,6 +87,7 @@ function shell(content) {
         </div>
         <div class="top-badges">
           <span class="badge">${escapeHtml(park.title || "Castle Course")}</span>
+          ${state.room?.gameEndsAt ? `<span class="badge live-clock">Park Clock ${formatSeconds(overallSecondsLeft())}</span>` : ""}
           ${state.room ? `<span class="badge">Room ${escapeHtml(state.room.code)}</span>` : ""}
         </div>
       </header>
@@ -119,6 +130,24 @@ function currentParkTheme() {
   return state.room?.parkTheme || state.selectedPark || "castle";
 }
 
+function formatSeconds(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function overallSecondsLeft() {
+  if (!state.room?.gameEndsAt) return state.gameDurationMinutes * 60;
+  return Math.max(0, Math.ceil((state.room.gameEndsAt - state.now) / 1000));
+}
+
+function claimedAvatarIds(room = state.room || state.previewRoom) {
+  return new Set((room?.players || [])
+    .filter((player) => player.id !== state.playerId)
+    .map((player) => player.avatar));
+}
+
 function lessonStats() {
   const lesson = state.deck?.lessonPlan;
   return `
@@ -131,11 +160,51 @@ function lessonStats() {
   `;
 }
 
-function avatarPicker() {
+function avatarPicker(room = state.room || state.previewRoom) {
+  const claimed = claimedAvatarIds(room);
+  const groups = [
+    { id: "class", title: "Class Crew", hint: "Real people and class teams" },
+    { id: "character", title: "Character Crew", hint: "Disney-inspired climbers" }
+  ];
   return `
-    <div class="avatar-picker" aria-label="Choose your climber avatar">
-      ${avatarOptions.map((avatar) => `
-        <button type="button" class="avatar-token ${state.selectedAvatar === avatar.id ? "active" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};">
+    <div class="avatar-dock">
+      <div class="avatar-dropzone" data-avatar-drop>
+        <span>Selected climber</span>
+        <strong>${escapeHtml(getAvatar(state.selectedAvatar).name)}</strong>
+        <em>Drag a token here or click a token below</em>
+      </div>
+      <div class="avatar-groups" aria-label="Choose your climber avatar">
+        ${groups.map((group) => `
+          <section class="avatar-column">
+            <div class="avatar-column-head">
+              <strong>${escapeHtml(group.title)}</strong>
+              <span>${escapeHtml(group.hint)}</span>
+            </div>
+            <div class="avatar-picker">
+              ${avatarOptions.filter((avatar) => avatar.category === group.id).map((avatar) => {
+                const taken = claimed.has(avatar.id);
+                return `
+                  <button type="button" draggable="${taken ? "false" : "true"}" class="avatar-token ${state.selectedAvatar === avatar.id ? "active" : ""} ${taken ? "claimed" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};" ${taken ? "disabled" : ""}>
+                    <span>${escapeHtml(avatar.short)}</span>
+                    <strong>${escapeHtml(avatar.name)}</strong>
+                    <em>${taken ? "Taken" : "Available"}</em>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </section>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function homeAvatarPicker() {
+  const featured = avatarOptions.filter((avatar) => ["anikshaa", "joy", "saharsh", "divyam", "vtl", "mickey", "minnie", "donald", "goofy", "stitch", "elsa", "buzz"].includes(avatar.id));
+  return `
+    <div class="avatar-preview-rail">
+      ${featured.map((avatar) => `
+        <button type="button" class="avatar-token compact ${state.selectedAvatar === avatar.id ? "active" : ""}" data-avatar="${escapeHtml(avatar.id)}" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow};">
           <span>${escapeHtml(avatar.short)}</span>
           <strong>${escapeHtml(avatar.name)}</strong>
         </button>
@@ -165,7 +234,7 @@ function climbPanel(title = "3D Infinite Parkour Climb") {
   const current = currentPlayer();
   const climbCost = state.room?.climbCost || 300;
   const climbHeight = state.room?.climbHeight || 24;
-  const canClimb = state.role === "player" && current && state.room?.status !== "answering" && current.score >= climbCost;
+  const canClimb = state.role === "player" && current && state.room?.status !== "finished" && current.score >= climbCost;
   const rows = players.slice(0, 5).map((player, index) => {
     const avatar = getAvatar(player.avatar);
     return `
@@ -182,7 +251,7 @@ function climbPanel(title = "3D Infinite Parkour Climb") {
       <div class="climb-copy">
         <span class="badge">${escapeHtml(park.label || "Course")} selected</span>
         <h2>${escapeHtml(title)}</h2>
-        <p class="muted">${escapeHtml(park.description || "")} Answer questions to earn point-bank currency, then spend ${climbCost} points to climb ${climbHeight} ft. Run out of points and you have to answer more questions before climbing again.</p>
+        <p class="muted">${escapeHtml(park.description || "")} Answer questions to earn point-bank currency, then spend ${climbCost} points to attempt the next ${climbHeight} ft obstacle. Pick the wrong lane and your height resets to 0.</p>
         ${state.role === "player" && current ? climbControls(current, canClimb, climbCost, climbHeight) : ""}
         <div class="height-board">${rows}</div>
       </div>
@@ -192,11 +261,17 @@ function climbPanel(title = "3D Infinite Parkour Climb") {
 }
 
 function climbControls(player, canClimb, climbCost, climbHeight) {
+  const next = player.nextObstacle || { title: "First Jump", label: "Forward", description: "Take the safe center lane." };
   return `
     <div class="climb-controls">
       <div>
         <strong>${player.score || 0} pts</strong>
         <span>${Math.floor((player.score || 0) / climbCost)} climbs ready</span>
+      </div>
+      <div class="obstacle-card">
+        <span>Next obstacle</span>
+        <strong>${escapeHtml(next.title)} · Aim ${escapeHtml(next.label)}</strong>
+        <em>${escapeHtml(next.description || "Clear the correct lane or fall to ground level.")}</em>
       </div>
       <div class="climb-buttons">
         <button class="btn secondary" data-climb="left" ${canClimb ? "" : "disabled"}>Left +${climbHeight} ft</button>
@@ -233,12 +308,25 @@ function renderHome() {
         </div>
       </div>
       <p class="official-line">Pick a park course, choose an avatar, earn points from BC integration, then spend those points to climb through themed 3D obstacles.</p>
-      ${avatarPicker()}
+      ${parkBoard()}
+      <div class="home-picker-block">
+        <div>
+          <span class="badge">30 climbers</span>
+          <h2>Choose your starting avatar</h2>
+        </div>
+        ${homeAvatarPicker()}
+      </div>
       ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
     </section>
     ${lessonStats()}
     ${climbPanel("Preview the Infinite Disney Parkour Tower")}
-    ${parkBoard()}
+    <section class="course-selector-block">
+      <div>
+        <span class="badge">Functional course selector</span>
+        <h2>Choose the park obstacle set</h2>
+      </div>
+      ${parkBoard()}
+    </section>
   `);
 }
 
@@ -249,16 +337,17 @@ function renderJoin() {
         <h2>Join a live room</h2>
         <label class="field">
           <span>Your display name</span>
-          <input name="name" maxlength="24" placeholder="Mickey Scholar" required />
+          <input name="name" maxlength="24" placeholder="Mickey Scholar" value="${escapeHtml(state.joinName)}" required />
         </label>
         <label class="field">
           <span>Room code</span>
-          <input name="roomCode" maxlength="5" placeholder="ABCDE" value="${escapeHtml(state.roomCode)}" required />
+          <input name="roomCode" data-room-code-input maxlength="5" placeholder="ABCDE" value="${escapeHtml(state.previewCode || state.roomCode)}" required />
         </label>
         <input type="hidden" name="avatar" value="${escapeHtml(state.selectedAvatar)}" />
         <div class="field">
           <span>Choose your parkour avatar</span>
-          ${avatarPicker()}
+          ${state.previewRoom ? `<p class="notice">Live room found. Taken avatars are locked.</p>` : `<p class="muted">Enter a 5-character room code to see which avatars are already taken.</p>`}
+          ${avatarPicker(state.previewRoom)}
         </div>
         ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
         <button class="btn gold" type="submit">Enter Park</button>
@@ -274,6 +363,24 @@ function renderJoin() {
   `);
 }
 
+function timerSetup() {
+  const options = [10, 15, 20, 30, 45];
+  return `
+    <div class="timer-setup">
+      <div>
+        <span class="badge">Overall Timer</span>
+        <h3>${state.gameDurationMinutes} minute park clock</h3>
+        <p class="muted">This is the whole game timer. Each question still has its own internal countdown.</p>
+      </div>
+      <div class="timer-options">
+        ${options.map((minutes) => `
+          <button class="timer-chip ${state.gameDurationMinutes === minutes ? "active" : ""}" data-duration="${minutes}">${minutes} min</button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderLobby() {
   const players = state.room.players.map(playerRow).join("") || `<p class="muted">Waiting for players...</p>`;
   const isHost = state.role === "host";
@@ -283,6 +390,7 @@ function renderLobby() {
         <p class="muted">${isHost ? "Share this code with players" : "You are in the park"}</p>
         <div class="room-code">${escapeHtml(state.room.code)}</div>
         <p class="notice">${isHost ? "Players enter this room code from the same website link. Start when everyone is listed." : "You joined successfully. Stay on this screen until the host starts the first mission."}</p>
+        ${isHost ? timerSetup() : `<div class="timer-setup compact"><span class="badge">Park Clock</span><strong>${Math.round((state.room.gameDurationSeconds || state.gameDurationMinutes * 60) / 60)} minutes when host starts</strong></div>`}
         <div class="actions" style="margin-top: 18px;">
           ${isHost ? `<button class="btn gold" data-action="start">Start Game</button>` : `<span class="badge">Waiting for host</span>`}
         </div>
@@ -298,10 +406,11 @@ function renderLobby() {
 }
 
 function playerRow(player) {
+  const next = player.nextObstacle?.label ? ` · next ${player.nextObstacle.label}` : "";
   return `
     <div class="player-row">
       <strong><span class="mini-avatar" style="--avatar-color:${getAvatar(player.avatar).color}">${escapeHtml(getAvatar(player.avatar).short)}</span>${escapeHtml(player.name)}</strong>
-        <span class="badge">${Math.round(player.height || 0)} ft · ${player.score} climb pts${player.answered ? " · checked in" : ""}</span>
+        <span class="badge">${Math.round(player.height || 0)} ft · ${player.score} climb pts${next}${player.answered ? " · checked in" : ""}</span>
     </div>
   `;
 }
@@ -344,11 +453,15 @@ function renderQuestion() {
           <div class="prompt">${escapeHtml(question.prompt)}</div>
           <div class="progress-rail"><span style="width:${Math.round(((state.room.currentQuestionIndex + 1) / state.room.totalQuestions) * 100)}%"></span></div>
         </div>
-        <div class="timer">${secondsLeft()}</div>
+        <div class="timer-stack">
+          <div class="timer"><span>Question</span><strong>${secondsLeft()}</strong></div>
+          <div class="timer small"><span>Park</span><strong>${formatSeconds(overallSecondsLeft())}</strong></div>
+        </div>
       </div>
       ${state.role === "host" ? hostAnswerMonitor() : ""}
       <div class="choices">${choices}</div>
       ${state.answeredChoiceId ? `<p class="notice">Ticket locked. Watch the host screen for the park reveal.</p>` : ""}
+      ${state.role === "player" ? climbPanel("Climb While the Park Clock Runs") : ""}
     </section>
   `);
 }
@@ -370,7 +483,7 @@ function renderResults() {
   const rows = (results?.playerResults || []).map((result, index) => `
     <div class="result-row">
       <strong><span class="mini-avatar" style="--avatar-color:${getAvatar(result.avatar).color}">${escapeHtml(getAvatar(result.avatar).short)}</span>#${index + 1} ${escapeHtml(result.name)}</strong>
-      <span class="badge">${result.isCorrect ? `+${result.pointsAwarded} pts` : "Missed"} · ${result.climbsAvailable || 0} climbs banked · ${Math.round(result.height || 0)} ft</span>
+      <span class="badge">${result.isCorrect ? `+${result.pointsAwarded} pts` : "Missed"} · ${result.climbsAvailable || 0} climbs banked · ${Math.round(result.height || 0)} ft · ${result.falls || 0} falls</span>
     </div>
   `).join("") || `<p class="muted">No answers submitted.</p>`;
 
@@ -474,6 +587,17 @@ function mountInteractiveScenes() {
   if (stage) renderClimbScene(stage, climbPlayers(), currentParkTheme());
 }
 
+async function attemptClimb(turn) {
+  if (state.role !== "player" || !state.room || state.room.status === "finished") return;
+  const reply = await api("/api/player/climb", {
+    roomCode: state.roomCode,
+    playerId: state.playerId,
+    turn
+  });
+  state.error = reply.ok ? "" : reply.error;
+  render();
+}
+
 function render() {
   if (!state.deck) return;
   if (state.view === "join") app.innerHTML = renderJoin();
@@ -492,10 +616,19 @@ app.addEventListener("click", async (event) => {
   const avatar = event.target.closest("[data-avatar]")?.dataset.avatar;
   const park = event.target.closest("[data-park]")?.dataset.park;
   const climb = event.target.closest("[data-climb]")?.dataset.climb;
+  const duration = event.target.closest("[data-duration]")?.dataset.duration;
 
   if (avatar) {
+    if (event.target.closest("[data-avatar]")?.disabled) return;
     state.selectedAvatar = avatar;
     localStorage.setItem("quizAvatar", avatar);
+    render();
+    return;
+  }
+
+  if (duration) {
+    state.gameDurationMinutes = Number(duration);
+    localStorage.setItem("quizGameDurationMinutes", String(state.gameDurationMinutes));
     render();
     return;
   }
@@ -508,13 +641,7 @@ app.addEventListener("click", async (event) => {
   }
 
   if (climb) {
-    const reply = await api("/api/player/climb", {
-      roomCode: state.roomCode,
-      playerId: state.playerId,
-      turn: climb
-    });
-    state.error = reply.ok ? "" : reply.error;
-    render();
+    await attemptClimb(climb);
     return;
   }
 
@@ -555,6 +682,8 @@ app.addEventListener("click", async (event) => {
       playerId: "",
       hostSecret: "",
       roomCode: "",
+      previewRoom: null,
+      previewCode: "",
       answeredChoiceId: "",
       error: ""
     });
@@ -564,6 +693,8 @@ app.addEventListener("click", async (event) => {
   if (action === "join-screen") {
     state.view = "join";
     state.error = "";
+    state.previewRoom = null;
+    state.previewCode = state.roomCode || "";
     render();
   }
 
@@ -587,9 +718,66 @@ app.addEventListener("click", async (event) => {
     render();
   }
 
-  if (action === "start") await api("/api/host/start", { roomCode: state.roomCode, hostSecret: state.hostSecret });
+  if (action === "start") await api("/api/host/start", { roomCode: state.roomCode, hostSecret: state.hostSecret, gameDurationSeconds: state.gameDurationMinutes * 60 });
   if (action === "next") await api("/api/host/next", { roomCode: state.roomCode, hostSecret: state.hostSecret });
   if (action === "reveal") await api("/api/host/reveal", { roomCode: state.roomCode, hostSecret: state.hostSecret });
+});
+
+app.addEventListener("dragstart", (event) => {
+  const token = event.target.closest("[data-avatar]");
+  if (!token || token.disabled) return;
+  state.dragAvatar = token.dataset.avatar;
+  event.dataTransfer?.setData("text/plain", state.dragAvatar);
+});
+
+app.addEventListener("dragover", (event) => {
+  if (event.target.closest("[data-avatar-drop]")) event.preventDefault();
+});
+
+app.addEventListener("drop", (event) => {
+  if (!event.target.closest("[data-avatar-drop]")) return;
+  event.preventDefault();
+  const avatar = event.dataTransfer?.getData("text/plain") || state.dragAvatar;
+  if (!avatar || claimedAvatarIds(state.previewRoom || state.room).has(avatar)) return;
+  state.selectedAvatar = avatar;
+  localStorage.setItem("quizAvatar", avatar);
+  render();
+});
+
+window.addEventListener("keydown", async (event) => {
+  if (event.repeat || state.role !== "player" || !state.room || state.room.status === "finished") return;
+  if (event.target?.matches?.("input, textarea, select")) return;
+  const keyMap = {
+    ArrowLeft: "left",
+    KeyA: "left",
+    ArrowRight: "right",
+    KeyD: "right",
+    ArrowUp: "straight",
+    KeyW: "straight",
+    Space: "straight"
+  };
+  const turn = keyMap[event.code];
+  if (!turn) return;
+  event.preventDefault();
+  await attemptClimb(turn);
+});
+
+app.addEventListener("input", async (event) => {
+  const input = event.target.closest("[data-room-code-input]");
+  const nameInput = event.target.closest("input[name='name']");
+  if (nameInput) state.joinName = nameInput.value;
+  if (!input) return;
+  const code = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  input.value = code;
+  state.previewCode = code;
+  if (code.length !== 5) {
+    state.previewRoom = null;
+    return;
+  }
+  const reply = await getJson(`/api/room?roomCode=${encodeURIComponent(code)}`).catch(() => ({ ok: false }));
+  if (state.previewCode !== code) return;
+  state.previewRoom = reply.ok ? reply.room : null;
+  render();
 });
 
 app.addEventListener("submit", async (event) => {

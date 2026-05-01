@@ -4,6 +4,7 @@ import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { lessonDeck } from "./data/questions.js";
+import { avatarIds } from "./public/avatar-data.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,9 @@ const rooms = new Map();
 const subscribers = new Map();
 const CLIMB_COST = 300;
 const CLIMB_HEIGHT = 24;
+const DEFAULT_GAME_DURATION_SECONDS = 20 * 60;
+const MIN_GAME_DURATION_SECONDS = 5 * 60;
+const MAX_GAME_DURATION_SECONDS = 60 * 60;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -27,7 +31,6 @@ const mimeTypes = {
   ".svg": "image/svg+xml"
 };
 
-const avatarIds = new Set(["mickey", "minnie", "donald", "goofy", "anikshaa", "joy", "saharsh", "divyam", "vtl"]);
 const parkThemeIds = new Set(["castle", "mickey", "minnie", "donald", "goofy", "quiz"]);
 
 function sendJson(res, status, body) {
@@ -97,6 +100,74 @@ function sanitizeTurn(turn) {
   return 0;
 }
 
+function sanitizeGameDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return DEFAULT_GAME_DURATION_SECONDS;
+  return Math.min(MAX_GAME_DURATION_SECONDS, Math.max(MIN_GAME_DURATION_SECONDS, Math.round(value)));
+}
+
+const obstaclePatterns = {
+  castle: [
+    { turn: "straight", title: "Rampart Run", label: "Forward", description: "Stay centered across the castle bridge." },
+    { turn: "right", title: "Turret Turn", label: "Right", description: "Curve around the tower spire." },
+    { turn: "left", title: "Royal Balcony", label: "Left", description: "Cut left to the balcony stones." },
+    { turn: "straight", title: "Firework Rail", label: "Forward", description: "Keep the rail balanced." }
+  ],
+  mickey: [
+    { turn: "right", title: "Red Block Bounce", label: "Right", description: "Jump to the red clubhouse block." },
+    { turn: "straight", title: "Yellow Glove Bridge", label: "Forward", description: "Run across the yellow bridge." },
+    { turn: "left", title: "Ear Platform", label: "Left", description: "Land on the left ear pad." },
+    { turn: "right", title: "Clubhouse Wall", label: "Right", description: "Turn to the wall stack." }
+  ],
+  minnie: [
+    { turn: "left", title: "Bow Ribbon", label: "Left", description: "Follow the pink bow ribbon." },
+    { turn: "straight", title: "Polka Dot Pads", label: "Forward", description: "Hop through the center dots." },
+    { turn: "right", title: "Ribbon Curl", label: "Right", description: "Curve right around the ribbon." },
+    { turn: "left", title: "Bow Knot", label: "Left", description: "Land on the bow knot." }
+  ],
+  donald: [
+    { turn: "straight", title: "Dock Planks", label: "Forward", description: "Sprint over the broken dock frame." },
+    { turn: "left", title: "Sail Tilt", label: "Left", description: "Lean left under the sail." },
+    { turn: "right", title: "Blue Pier Jump", label: "Right", description: "Jump right to the blue pier." },
+    { turn: "straight", title: "Duck Bridge", label: "Forward", description: "Stay centered on the duck-frame bridge." }
+  ],
+  goofy: [
+    { turn: "right", title: "Tree Fork", label: "Right", description: "Take the right branch." },
+    { turn: "left", title: "Log Hop", label: "Left", description: "Hop left across the log." },
+    { turn: "straight", title: "Forest Beam", label: "Forward", description: "Balance straight through the beam." },
+    { turn: "right", title: "Leaf Launch", label: "Right", description: "Launch right to the leaf pad." }
+  ],
+  quiz: [
+    { turn: "straight", title: "Question Gate", label: "Forward", description: "Push through the center gate." },
+    { turn: "right", title: "Pixar Pop Ramp", label: "Right", description: "Ride the bright right ramp." },
+    { turn: "left", title: "Castle Card Flip", label: "Left", description: "Flip left to the castle card." },
+    { turn: "straight", title: "Final Answer Pad", label: "Forward", description: "Hold the forward lane." }
+  ]
+};
+
+function turnName(turnValue) {
+  if (turnValue < 0) return "left";
+  if (turnValue > 0) return "right";
+  return "straight";
+}
+
+function turnValue(turnNameValue) {
+  if (turnNameValue === "left") return -1;
+  if (turnNameValue === "right") return 1;
+  return 0;
+}
+
+function nextObstacleFor(room, player) {
+  const pattern = obstaclePatterns[room.parkTheme || "castle"] || obstaclePatterns.castle;
+  const step = Math.floor((player.height || 0) / CLIMB_HEIGHT) % pattern.length;
+  const obstacle = pattern[step];
+  return {
+    ...obstacle,
+    step: step + 1,
+    turnValue: turnValue(obstacle.turn)
+  };
+}
+
 function playerQuestion(question, includeChoices) {
   return {
     id: question.id,
@@ -121,6 +192,7 @@ function playerQuestion(question, includeChoices) {
 
 function publicRoom(room) {
   const question = lessonDeck.questions[room.currentQuestionIndex] || null;
+  const now = Date.now();
   return {
     code: room.code,
     status: room.status,
@@ -130,6 +202,11 @@ function publicRoom(room) {
     totalQuestions: lessonDeck.questions.length,
     questionStartedAt: room.questionStartedAt,
     parkTheme: room.parkTheme || "castle",
+    gameDurationSeconds: room.gameDurationSeconds || DEFAULT_GAME_DURATION_SECONDS,
+    gameStartedAt: room.gameStartedAt || null,
+    gameEndsAt: room.gameEndsAt || null,
+    gameSecondsLeft: room.gameEndsAt ? Math.max(0, Math.ceil((room.gameEndsAt - now) / 1000)) : null,
+    claimedAvatars: [...room.players.values()].map((player) => player.avatar),
     climbCost: CLIMB_COST,
     climbHeight: CLIMB_HEIGHT,
     players: [...room.players.values()].map((player) => ({
@@ -140,6 +217,8 @@ function publicRoom(room) {
       avatar: player.avatar || "mickey",
       direction: player.direction ?? 0,
       lastClimbAt: player.lastClimbAt || null,
+      nextObstacle: nextObstacleFor(room, player),
+      falls: player.falls || 0,
       streak: player.streak,
       answered: Boolean(room.answers.get(player.id)),
       frozenNext: player.frozenQuestionIndex === room.currentQuestionIndex + 1 || player.frozenQuestionIndex === room.currentQuestionIndex,
@@ -215,6 +294,8 @@ function computeResults(room) {
       height: player.height ?? 0,
       avatar: player.avatar || "mickey",
       direction: player.direction ?? 0,
+      nextObstacle: nextObstacleFor(room, player),
+      falls: player.falls || 0,
       streak: player.streak,
       pointsAwarded,
       climbsAvailable: Math.floor(player.score / CLIMB_COST),
@@ -247,14 +328,38 @@ function closeQuestion(room) {
   publish(room);
 }
 
+function finishGame(room) {
+  if (room.timer) clearTimeout(room.timer);
+  if (room.gameTimer) clearTimeout(room.gameTimer);
+  room.timer = null;
+  room.gameTimer = null;
+  room.status = "finished";
+  publish(room);
+}
+
+function startGameClock(room, seconds) {
+  const durationSeconds = sanitizeGameDuration(seconds || room.gameDurationSeconds);
+  room.gameDurationSeconds = durationSeconds;
+  room.gameStartedAt = Date.now();
+  room.gameEndsAt = room.gameStartedAt + durationSeconds * 1000;
+  if (room.gameTimer) clearTimeout(room.gameTimer);
+  room.gameTimer = setTimeout(() => finishGame(room), durationSeconds * 1000);
+}
+
 function startQuestion(room) {
+  if (room.gameEndsAt && Date.now() >= room.gameEndsAt) {
+    finishGame(room);
+    return;
+  }
   if (room.timer) clearTimeout(room.timer);
   room.status = "answering";
   room.answers = new Map();
   room.lastResults = null;
   room.questionStartedAt = Date.now();
   const question = lessonDeck.questions[room.currentQuestionIndex];
-  room.timer = setTimeout(() => closeQuestion(room), question.timeLimitSeconds * 1000);
+  const questionMs = question.timeLimitSeconds * 1000;
+  const remainingMs = room.gameEndsAt ? Math.max(1, room.gameEndsAt - Date.now()) : questionMs;
+  room.timer = setTimeout(() => closeQuestion(room), Math.min(questionMs, remainingMs));
   publish(room);
 }
 
@@ -268,6 +373,8 @@ function syncLastResultScores(room) {
       score: player.score,
       height: player.height,
       direction: player.direction ?? 0,
+      nextObstacle: nextObstacleFor(room, player),
+      falls: player.falls || 0,
       streak: player.streak,
       climbsAvailable: Math.floor(player.score / CLIMB_COST)
     } : result;
@@ -331,9 +438,7 @@ function usePlayerPower(room, playerId, power) {
 }
 
 function useClimb(room, playerId, turn) {
-  if (room.status === "answering") {
-    throw new Error("Answer the current question first, then spend points to climb on the reveal screen.");
-  }
+  if (room.status === "finished") throw new Error("The overall park timer ended.");
   const player = room.players.get(playerId);
   if (!player) throw new Error("Player session not recognized.");
   if (player.score < CLIMB_COST) {
@@ -341,12 +446,23 @@ function useClimb(room, playerId, turn) {
   }
 
   const turnValue = sanitizeTurn(turn);
+  const chosenTurn = turnName(turnValue);
+  const obstacle = nextObstacleFor(room, player);
   player.score -= CLIMB_COST;
-  player.height = (player.height || 0) + CLIMB_HEIGHT;
-  player.direction = (player.direction || 0) + turnValue;
   player.lastClimbAt = Date.now();
-  const turnLabel = turnValue < 0 ? "left" : turnValue > 0 ? "right" : "forward";
-  room.actionLog.push(`${player.name} spent ${CLIMB_COST} points, turned ${turnLabel}, and climbed ${CLIMB_HEIGHT} ft.`);
+
+  if (chosenTurn !== obstacle.turn) {
+    const oldHeight = player.height || 0;
+    player.height = 0;
+    player.direction = 0;
+    player.falls = (player.falls || 0) + 1;
+    room.actionLog.push(`${player.name} missed ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
+  } else {
+    player.height = (player.height || 0) + CLIMB_HEIGHT;
+    player.direction = (player.direction || 0) + turnValue;
+    const turnLabel = turnValue < 0 ? "left" : turnValue > 0 ? "right" : "forward";
+    room.actionLog.push(`${player.name} spent ${CLIMB_COST} points, cleared ${obstacle.title}, turned ${turnLabel}, and climbed ${CLIMB_HEIGHT} ft.`);
+  }
   syncLastResultScores(room);
   publish(room);
 }
@@ -395,6 +511,13 @@ async function handleApi(req, res) {
       return;
     }
 
+    if (req.method === "GET" && route === "/api/room") {
+      const code = String(requestUrl.searchParams.get("roomCode") || "").toUpperCase();
+      const room = requireRoom(code);
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
+      return;
+    }
+
     if (req.method === "GET" && route === "/api/events") {
       const code = String(requestUrl.searchParams.get("roomCode") || "").toUpperCase();
       const room = requireRoom(code);
@@ -427,6 +550,10 @@ async function handleApi(req, res) {
         status: "lobby",
         currentQuestionIndex: 0,
         questionStartedAt: null,
+        gameDurationSeconds: DEFAULT_GAME_DURATION_SECONDS,
+        gameStartedAt: null,
+        gameEndsAt: null,
+        gameTimer: null,
         players: new Map(),
         answers: new Map(),
         timer: null,
@@ -441,15 +568,20 @@ async function handleApi(req, res) {
 
     if (route === "/api/player/join") {
       const room = requireRoom(body.roomCode);
+      const avatar = sanitizeAvatar(body.avatar);
+      if ([...room.players.values()].some((player) => player.avatar === avatar)) {
+        throw new Error("That avatar is already taken in this room. Pick another climber.");
+      }
       const playerId = makeId();
       room.players.set(playerId, {
         id: playerId,
         name: sanitizeName(body.name),
-        avatar: sanitizeAvatar(body.avatar),
+        avatar,
         score: 0,
         height: 0,
         direction: 0,
         lastClimbAt: null,
+        falls: 0,
         streak: 0,
         frozenQuestionIndex: null,
         powerUsedQuestion: -1
@@ -463,6 +595,7 @@ async function handleApi(req, res) {
       const room = requireRoom(body.roomCode);
       requireHost(room, body.hostSecret);
       room.currentQuestionIndex = 0;
+      startGameClock(room, body.gameDurationSeconds);
       startQuestion(room);
       sendJson(res, 200, { ok: true });
       return;
@@ -480,8 +613,7 @@ async function handleApi(req, res) {
       const room = requireRoom(body.roomCode);
       requireHost(room, body.hostSecret);
       if (room.currentQuestionIndex >= lessonDeck.questions.length - 1) {
-        room.status = "finished";
-        publish(room);
+        finishGame(room);
         sendJson(res, 200, { ok: true, finished: true });
         return;
       }
