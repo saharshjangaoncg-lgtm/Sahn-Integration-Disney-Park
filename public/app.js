@@ -60,6 +60,8 @@ function preserveLocalClimber(room, localPlayer) {
     direction: localPlayer.direction,
     falls: localPlayer.falls,
     lastClimbAt: localPlayer.lastClimbAt,
+    lastJumpAt: localPlayer.lastJumpAt,
+    jumpArmedMoves: localPlayer.jumpArmedMoves,
     nextObstacle: localPlayer.nextObstacle,
     lastResult: localPlayer.lastResult || serverPlayer.lastResult
   };
@@ -290,7 +292,7 @@ function climbPanel(title = "3D Infinite Parkour Climb", options = {}) {
       <div class="climb-copy">
         <span class="badge">${escapeHtml(park.label || "Course")} selected</span>
         <h2>${escapeHtml(title)}</h2>
-        <p class="muted">${escapeHtml(park.description || "")} Answer questions to fill your point bank, open the Climb Course, then move like a platformer while small point costs drain as you run. Clear each themed lane marker or fall back to 0 ft.</p>
+        <p class="muted">${escapeHtml(park.description || "")} Answer questions to fill your point bank, open the Climb Course, then run smoothly, steer lanes, and time Space jumps at each obstacle gate or fall back to 0 ft.</p>
         ${state.role === "player" && current ? climbControls(current, canClimb, climbCost, climbHeight, { showKeyboardHint: !immersive }) : ""}
         <div class="height-board">${rows}</div>
       </div>
@@ -324,19 +326,21 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
       </div>
       <div class="climb-buttons">
         <button class="btn secondary" data-climb="left" data-climb-button="left" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Left -${costs.side}</button>
-        <button class="btn gold" data-climb="straight" data-climb-button="straight" ${(player.score || 0) >= costs.forward ? "" : "disabled"}>Forward +${climbHeight} ft -${costs.forward}</button>
+        <button class="btn gold" data-climb="straight" data-climb-button="straight" ${(player.score || 0) >= costs.forward ? "" : "disabled"}>Run +${climbHeight} ft -${costs.forward}</button>
+        <button class="btn jump" data-climb="jump" data-climb-button="jump" ${(player.score || 0) >= costs.forward ? "" : "disabled"}>Jump -${costs.forward}</button>
         <button class="btn secondary" data-climb="back" data-climb-button="back" ${(player.score || 0) >= costs.back ? "" : "disabled"}>Back -${costs.back}</button>
         <button class="btn secondary" data-climb="right" data-climb-button="right" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Right -${costs.side}</button>
       </div>
       ${showKeyboardHint ? `
         <div class="keyboard-hint">
           <kbd>A</kbd><kbd>←</kbd><span>left</span>
-          <kbd>W</kbd><kbd>↑</kbd><kbd>Space</kbd><span>forward</span>
+          <kbd>W</kbd><kbd>↑</kbd><span>run</span>
+          <kbd>Space</kbd><span>timed jump</span>
           <kbd>S</kbd><kbd>↓</kbd><span>back</span>
           <kbd>D</kbd><kbd>→</kbd><span>right</span>
         </div>
       ` : ""}
-      <p class="muted" data-climb-message>${canClimb ? "Hold movement keys for smooth walking. Your point bank drains continuously." : `No movement energy yet. Earn at least ${climbCost} points from questions or powers.`}</p>
+      <p class="muted" data-climb-message>${canClimb ? "Hold W to run, steer with A/D, and press Space right before obstacle gates." : `No movement energy yet. Earn at least ${climbCost} points from questions or powers.`}</p>
     </div>
   `;
 }
@@ -401,11 +405,12 @@ function renderClimbMode() {
         <div>
           <span class="badge">Third-person parkour</span>
           <h2>${escapeHtml(park.title)} Run</h2>
-          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. Your question timer pauses here. Hold W or space to move forward, use S to back up, A/D to shift lanes, and drag on the course to look around.</p>
+          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. Your question timer pauses here. Hold W to run, press Space for timed jumps, use S to back up, A/D to steer lanes, and drag on the course to look around.</p>
         </div>
         <div class="control-card">
           <kbd>A</kbd><kbd>←</kbd><span>left</span>
-          <kbd>W</kbd><kbd>↑</kbd><kbd>Space</kbd><span>forward</span>
+          <kbd>W</kbd><kbd>↑</kbd><span>run</span>
+          <kbd>Space</kbd><span>jump</span>
           <kbd>S</kbd><kbd>↓</kbd><span>back</span>
           <kbd>D</kbd><kbd>→</kbd><span>right</span>
         </div>
@@ -812,7 +817,7 @@ function refreshClimbHud() {
   if (nextDescriptionNode) nextDescriptionNode.textContent = next.description || "Clear the correct lane or fall to ground level.";
   if (messageNode) {
     messageNode.textContent = state.error || ((player.score || 0) >= costs.back
-      ? "Hold movement keys for smooth walking. Your point bank drains continuously."
+      ? "Hold W to run, steer with A/D, and press Space right before obstacle gates."
       : `Movement energy empty. Answer more questions to refill your point bank.`);
   }
   if (navPointNode) navPointNode.textContent = player.score || 0;
@@ -832,7 +837,7 @@ function movementCostForTurn(turn) {
 }
 
 function normalizedClimbTurn(turn) {
-  if (turn === "left" || turn === "right" || turn === "back") return turn;
+  if (turn === "left" || turn === "right" || turn === "back" || turn === "jump") return turn;
   return "forward";
 }
 
@@ -894,6 +899,7 @@ function applyLocalClimbMove(turn) {
   player.lastClimbAt = Date.now();
   player.height ??= 0;
   player.direction ??= 0;
+  player.jumpArmedMoves ??= 0;
 
   if (action === "left" || action === "right") {
     const laneStep = 0.28;
@@ -901,6 +907,14 @@ function applyLocalClimbMove(turn) {
   } else if (action === "back") {
     player.height = Math.max(0, (player.height || 0) - climbHeight);
   } else {
+    if (action === "jump") {
+      player.lastJumpAt = Date.now();
+      player.jumpArmedMoves = 5;
+    }
+    const jumpReady = action === "jump" || (player.jumpArmedMoves || 0) > 0;
+    if (action !== "jump" && player.jumpArmedMoves > 0) {
+      player.jumpArmedMoves = Math.max(0, player.jumpArmedMoves - 1);
+    }
     const oldHeight = player.height || 0;
     const oldStep = Math.floor(oldHeight / obstacleHeight);
     player.height = oldHeight + climbHeight;
@@ -909,10 +923,13 @@ function applyLocalClimbMove(turn) {
     if (newStep > oldStep) {
       const expectedLane = typeof player.nextObstacle?.turnValue === "number" ? player.nextObstacle.turnValue : 0;
       const currentLane = laneFromDirection(player.direction);
-      if (currentLane !== expectedLane) {
+      if (currentLane !== expectedLane || !jumpReady) {
         player.height = 0;
         player.direction = 0;
+        player.jumpArmedMoves = 0;
         player.falls = (player.falls || 0) + 1;
+      } else {
+        player.jumpArmedMoves = 0;
       }
     }
   }
@@ -923,6 +940,7 @@ function applyLocalClimbMove(turn) {
       score: player.score,
       height: player.height,
       direction: player.direction,
+      lastJumpAt: player.lastJumpAt,
       falls: player.falls || 0
     };
   }
@@ -988,9 +1006,9 @@ function climbTurnFromKey(code) {
     KeyA: "left",
     ArrowRight: "right",
     KeyD: "right",
-    ArrowUp: "straight",
-    KeyW: "straight",
-    Space: "straight",
+    ArrowUp: "forward",
+    KeyW: "forward",
+    Space: "jump",
     ArrowDown: "back",
     KeyS: "back"
   };
@@ -1005,8 +1023,8 @@ function currentHeldClimbTurn() {
       : "";
   const forwardBack = heldClimbKeys.has("KeyS") || heldClimbKeys.has("ArrowDown")
     ? "back"
-    : heldClimbKeys.has("KeyW") || heldClimbKeys.has("ArrowUp") || heldClimbKeys.has("Space")
-      ? "straight"
+    : heldClimbKeys.has("KeyW") || heldClimbKeys.has("ArrowUp")
+      ? "forward"
       : "";
 
   if (side && forwardBack) {
@@ -1233,6 +1251,10 @@ window.addEventListener("keydown", async (event) => {
   const turn = climbTurnFromKey(event.code);
   if (!turn) return;
   event.preventDefault();
+  if (turn === "jump") {
+    if (!event.repeat) queueClimbMove("jump", { flushSoon: true });
+    return;
+  }
   heldClimbKeys.add(event.code);
   startClimbMovementLoop();
 });

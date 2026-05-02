@@ -588,6 +588,12 @@ h1 {
   color: #1d1d1d;
 }
 
+.btn.jump {
+  background: linear-gradient(135deg, #ff8ac6, #f6d24a);
+  color: #21151b;
+  box-shadow: 0 12px 26px rgba(255, 138, 198, 0.24);
+}
+
 .btn:hover {
   filter: brightness(1.08);
 }
@@ -1163,7 +1169,7 @@ select optgroup {
 
 .climb-buttons {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 

@@ -297,6 +297,7 @@ function publicPlayer(room, player) {
     avatar: player.avatar || "mickey",
     direction: player.direction ?? 0,
     lastClimbAt: player.lastClimbAt || null,
+    lastJumpAt: player.lastJumpAt || null,
     nextObstacle: nextObstacleFor(room, player),
     falls: player.falls || 0,
     streak: player.streak,
@@ -632,6 +633,7 @@ function normalizeClimbAction(turn) {
   if (action === "left") return "left";
   if (action === "right") return "right";
   if (action === "back" || action === "backward" || action === "down") return "back";
+  if (action === "jump" || action === "space") return "jump";
   return "forward";
 }
 
@@ -646,6 +648,7 @@ function applyClimbMove(room, player, turn) {
   const isLeft = action === "left";
   const isRight = action === "right";
   const isBack = action === "back";
+  const isJump = action === "jump";
   const cost = climbCostForAction(action);
   if (player.score < cost) {
     throw new Error(`You need ${cost} points to move. Answer more questions to refill your point bank.`);
@@ -655,12 +658,21 @@ function applyClimbMove(room, player, turn) {
   player.lastClimbAt = Date.now();
   player.height ??= 0;
   player.direction ??= 0;
+  player.jumpArmedMoves ??= 0;
 
   if (isLeft || isRight) {
     player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -CLIMB_LANE_STEP : CLIMB_LANE_STEP)));
   } else if (isBack) {
     player.height = Math.max(0, (player.height || 0) - CLIMB_STEP_HEIGHT);
   } else {
+    if (isJump) {
+      player.lastJumpAt = Date.now();
+      player.jumpArmedMoves = 5;
+    }
+    const jumpReady = isJump || (player.jumpArmedMoves || 0) > 0;
+    if (!isJump && player.jumpArmedMoves > 0) {
+      player.jumpArmedMoves = Math.max(0, (player.jumpArmedMoves || 0) - 1);
+    }
     const oldHeight = player.height || 0;
     const oldStep = Math.floor(oldHeight / CLIMB_HEIGHT);
     const obstacle = nextObstacleFor(room, player);
@@ -671,14 +683,16 @@ function applyClimbMove(room, player, turn) {
     const currentLane = Math.abs(lane) < 0.55 ? 0 : Math.max(-1, Math.min(1, Math.sign(lane)));
     const laneMatched = currentLane === expectedLane;
 
-    if (newStep > oldStep && !laneMatched) {
+    if (newStep > oldStep && (!laneMatched || !jumpReady)) {
       player.height = 0;
       player.direction = 0;
+      player.jumpArmedMoves = 0;
       player.falls = (player.falls || 0) + 1;
-      room.actionLog.push(`${player.name} clipped ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
+      room.actionLog.push(`${player.name} missed the timed jump on ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
     } else if (newStep > oldStep) {
       const turnLabel = expectedLane < 0 ? "left" : expectedLane > 0 ? "right" : "center";
       room.actionLog.push(`${player.name} cleared ${obstacle.title} in the ${turnLabel} lane and kept climbing.`);
+      player.jumpArmedMoves = 0;
     }
   }
 
@@ -836,6 +850,8 @@ async function handleApi(req, res) {
         height: 0,
         direction: 0,
         lastClimbAt: null,
+        lastJumpAt: null,
+        jumpArmedMoves: 0,
         falls: 0,
         streak: 0,
         phase: room.status === "answering" ? "answering" : "lobby",

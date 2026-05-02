@@ -94,6 +94,7 @@ function normalizeClimbers(climbers) {
       direction: Number(player.direction || 0),
       falls: Number(player.falls || 0),
       lastClimbAt: Number(player.lastClimbAt || 0),
+      lastJumpAt: Number(player.lastJumpAt || 0),
       answered: Boolean(player.answered)
     }))
     .sort((a, b) => b.height - a.height || b.score - a.score)
@@ -150,6 +151,32 @@ function createScene(THREE, container) {
     });
   }
 
+  function roundedPadGeometry(width, height, depth, radius = 0.18) {
+    const x = -width / 2;
+    const y = -depth / 2;
+    const shape = new THREE.Shape();
+    shape.moveTo(x + radius, y);
+    shape.lineTo(x + width - radius, y);
+    shape.quadraticCurveTo(x + width, y, x + width, y + radius);
+    shape.lineTo(x + width, y + depth - radius);
+    shape.quadraticCurveTo(x + width, y + depth, x + width - radius, y + depth);
+    shape.lineTo(x + radius, y + depth);
+    shape.quadraticCurveTo(x, y + depth, x, y + depth - radius);
+    shape.lineTo(x, y + radius);
+    shape.quadraticCurveTo(x, y, x + radius, y);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: height,
+      bevelEnabled: true,
+      bevelThickness: 0.025,
+      bevelSize: 0.035,
+      bevelSegments: 3,
+      curveSegments: 8
+    });
+    geometry.rotateX(Math.PI / 2);
+    geometry.translate(0, height / 2, 0);
+    return geometry;
+  }
+
   function routePoint(step, lane = 0) {
     const segmentSize = 7;
     const segment = Math.floor(step / segmentSize);
@@ -191,12 +218,13 @@ function createScene(THREE, container) {
       const point = routePoint(i, 0);
       const width = theme.obstacle === "trees" ? 1.28 : theme.obstacle === "dock" ? 1.72 : 1.92;
       const depth = theme.obstacle === "clubhouse" ? 0.94 : 0.72;
-      const platform = new THREE.Mesh(new THREE.BoxGeometry(width, 0.13, depth), i % 5 === 0 ? railMaterial : baseMaterial);
+      const platformGeometry = roundedPadGeometry(width, 0.13, depth, Math.min(0.28, depth * 0.42));
+      const platform = new THREE.Mesh(platformGeometry, i % 5 === 0 ? railMaterial : baseMaterial);
       platform.position.set(point.x, point.y, point.z);
       platform.rotation.y = point.yaw + (i % 9 === 0 ? 0.18 : 0);
       tower.add(platform);
 
-      const underside = new THREE.Mesh(new THREE.BoxGeometry(width * 0.92, 0.2, depth * 0.92), shadowMaterial);
+      const underside = new THREE.Mesh(roundedPadGeometry(width * 0.9, 0.2, depth * 0.86, Math.min(0.24, depth * 0.35)), shadowMaterial);
       underside.position.set(point.x, point.y - 0.15, point.z);
       underside.rotation.y = platform.rotation.y;
       tower.add(underside);
@@ -210,7 +238,7 @@ function createScene(THREE, container) {
         const dx = point.x - prev.x;
         const dz = point.z - prev.z;
         const distance = Math.hypot(dx, dz);
-        const bridge = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.45, distance), 0.055, 0.16), railMaterial);
+        const bridge = new THREE.Mesh(roundedPadGeometry(Math.max(0.45, distance), 0.055, 0.18, 0.08), railMaterial);
         bridge.position.set((point.x + prev.x) / 2, point.y - 0.08, (point.z + prev.z) / 2);
         bridge.rotation.y = Math.atan2(dz, dx);
         tower.add(bridge);
@@ -234,7 +262,7 @@ function createScene(THREE, container) {
     }
 
     for (let marker = 0; marker < 5; marker += 1) {
-      const banner = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 0.08), accentMaterial);
+      const banner = new THREE.Mesh(roundedPadGeometry(1.6, 0.08, 0.7, 0.15), accentMaterial);
       const point = routePoint(marker * 12 + 4, marker % 2 ? -1 : 1);
       banner.position.set(point.x, point.y + 1.05, point.z);
       banner.rotation.y = point.yaw;
@@ -423,6 +451,7 @@ function createScene(THREE, container) {
     glow.position.y = 0.25;
     glow.rotation.x = Math.PI / 2;
     group.add(leftLeg, rightLeg, body, leftArm, rightArm, head, glow);
+    group.userData.parts = { leftArm, rightArm, leftLeg, rightLeg, body, head, glow };
     addAvatarFeatures(group, avatar, material, accentMaterial);
     group.scale.setScalar(1.08);
     players.add(group);
@@ -553,6 +582,7 @@ function createScene(THREE, container) {
       mesh.userData.answered = player.answered;
       mesh.userData.falling = player.height === 0 && (player.falls || 0) > 0;
       mesh.userData.lastClimbAt = player.lastClimbAt;
+      mesh.userData.lastJumpAt = player.lastJumpAt;
     });
 
     for (const [id, mesh] of playerMeshes) {
@@ -585,9 +615,13 @@ function createScene(THREE, container) {
     tower.rotation.y = Math.sin(frame * 0.22) * 0.035;
     players.rotation.y = tower.rotation.y;
     players.children.forEach((mesh, index) => {
-      const jumpAge = mesh.userData.lastClimbAt ? Date.now() - mesh.userData.lastClimbAt : 9999;
-      const jumpLift = jumpAge < 780 ? Math.sin((jumpAge / 780) * Math.PI) * 0.78 : 0;
-      const bob = Math.sin(frame * 5 + index) * 0.035;
+      const now = Date.now();
+      const moveAge = mesh.userData.lastClimbAt ? now - mesh.userData.lastClimbAt : 9999;
+      const jumpAge = mesh.userData.lastJumpAt ? now - mesh.userData.lastJumpAt : 9999;
+      const runBlend = Math.max(0, Math.min(1, 1 - moveAge / 240));
+      const jumpLift = jumpAge < 820 ? Math.sin((jumpAge / 820) * Math.PI) * 0.86 : 0;
+      const stride = Math.sin(now * 0.018 + index);
+      const bob = runBlend * Math.abs(stride) * 0.055;
       const target = mesh.userData.targetPosition;
       if (target) {
         mesh.position.x += (target.x - mesh.position.x) * 0.13;
@@ -597,6 +631,16 @@ function createScene(THREE, container) {
       if (typeof mesh.userData.targetYaw === "number") {
         const yawDelta = Math.atan2(Math.sin(mesh.userData.targetYaw - mesh.rotation.y), Math.cos(mesh.userData.targetYaw - mesh.rotation.y));
         mesh.rotation.y += yawDelta * 0.14;
+      }
+      const parts = mesh.userData.parts || {};
+      if (parts.leftLeg) {
+        parts.leftLeg.rotation.x = stride * 0.58 * runBlend;
+        parts.rightLeg.rotation.x = -stride * 0.58 * runBlend;
+        parts.leftArm.rotation.x = -stride * 0.42 * runBlend;
+        parts.rightArm.rotation.x = stride * 0.42 * runBlend;
+        parts.body.rotation.x = -0.08 * runBlend - jumpLift * 0.08;
+        parts.head.position.y = 0.47 + bob * 0.45;
+        parts.glow.rotation.z += 0.02 + runBlend * 0.035;
       }
       mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
       mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
