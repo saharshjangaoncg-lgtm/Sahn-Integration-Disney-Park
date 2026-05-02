@@ -493,9 +493,19 @@ function createScene(THREE, container) {
 
   function playerRoutePoint(player) {
     const loopHeight = player.height % loopFeet;
-    const step = Math.min(platformCount - 1, Math.floor(loopHeight / 24));
+    const progress = loopHeight / 24;
+    const step = Math.min(platformCount - 2, Math.max(0, Math.floor(progress)));
+    const nextStep = Math.min(platformCount - 1, step + 1);
+    const mix = Math.max(0, Math.min(1, progress - step));
     const lane = Math.max(-2, Math.min(2, player.direction || 0));
-    return routePoint(step, lane);
+    const from = routePoint(step, lane);
+    const to = routePoint(nextStep, lane);
+    return {
+      x: from.x + (to.x - from.x) * mix,
+      y: from.y + (to.y - from.y) * mix,
+      z: from.z + (to.z - from.z) * mix,
+      yaw: from.yaw + (to.yaw - from.yaw) * mix
+    };
   }
 
   function update(climbers, courseId = "castle", focusPlayerId = "") {

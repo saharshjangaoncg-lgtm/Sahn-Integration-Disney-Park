@@ -14,11 +14,12 @@ const HOST = process.env.HOST || "0.0.0.0";
 
 const rooms = new Map();
 const subscribers = new Map();
-const CLIMB_FORWARD_COST = 12;
-const CLIMB_SIDE_COST = 5;
-const CLIMB_BACK_COST = 4;
-const CLIMB_STEP_HEIGHT = 4;
+const CLIMB_FORWARD_COST = 18;
+const CLIMB_SIDE_COST = 9;
+const CLIMB_BACK_COST = 8;
+const CLIMB_STEP_HEIGHT = 2;
 const CLIMB_HEIGHT = 24;
+const CLIMB_LANE_STEP = 0.28;
 const DEFAULT_GAME_DURATION_SECONDS = 20 * 60;
 const MIN_GAME_DURATION_SECONDS = 5 * 60;
 const MAX_GAME_DURATION_SECONDS = 60 * 60;
@@ -646,10 +647,10 @@ function useClimb(room, playerId, turn) {
   player.direction ??= 0;
 
   if (isLeft || isRight) {
-    player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -1 : 1)));
+    player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -CLIMB_LANE_STEP : CLIMB_LANE_STEP)));
     room.actionLog.push(`${player.name} shifted ${isLeft ? "left" : "right"} and spent ${cost} movement points.`);
   } else if (isBack) {
-    player.height = Math.max(0, (player.height || 0) - Math.max(2, Math.floor(CLIMB_STEP_HEIGHT * 0.75)));
+    player.height = Math.max(0, (player.height || 0) - CLIMB_STEP_HEIGHT);
     room.actionLog.push(`${player.name} backed up safely and spent ${cost} movement points.`);
   } else {
     const oldHeight = player.height || 0;
@@ -658,7 +659,8 @@ function useClimb(room, playerId, turn) {
     const expectedLane = obstacle.turnValue;
     player.height = oldHeight + CLIMB_STEP_HEIGHT;
     const newStep = Math.floor(player.height / CLIMB_HEIGHT);
-    const currentLane = Math.max(-1, Math.min(1, Math.sign(player.direction || 0)));
+    const lane = player.direction || 0;
+    const currentLane = Math.abs(lane) < 0.55 ? 0 : Math.max(-1, Math.min(1, Math.sign(lane)));
     const laneMatched = currentLane === expectedLane;
 
     if (newStep > oldStep && !laneMatched) {
@@ -922,7 +924,7 @@ async function handleApi(req, res) {
     if (route === "/api/player/climb") {
       const room = requireRoom(body.roomCode);
       useClimb(room, body.playerId, body.turn);
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
       return;
     }
 

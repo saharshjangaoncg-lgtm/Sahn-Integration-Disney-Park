@@ -22,6 +22,9 @@ const state = {
   now: Date.now()
 };
 let lastClimbInputAt = 0;
+let climbMoveTimer = null;
+let climbMoveInFlight = false;
+const heldClimbKeys = new Set();
 
 setInterval(() => {
   state.now = Date.now();
@@ -69,6 +72,7 @@ function connectEvents(roomCode) {
       document.querySelectorAll("[data-question-clock]").forEach((node) => {
         node.textContent = questionClockLabel();
       });
+      refreshClimbHud();
       mountInteractiveScenes();
       return;
     }
@@ -288,13 +292,13 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
         </div>
       </div>
       <div class="climb-bank">
-        <strong>${player.score || 0} pts</strong>
+        <strong data-climb-points>${player.score || 0} pts</strong>
         <span>${Math.floor((player.score || 0) / costs.forward)} forward moves ready</span>
       </div>
       <div class="obstacle-card">
         <span>Next obstacle</span>
-        <strong>${escapeHtml(next.title)} · Aim ${escapeHtml(next.label)}</strong>
-        <em>${escapeHtml(next.description || "Clear the correct lane or fall to ground level.")}</em>
+        <strong data-climb-next>${escapeHtml(next.title)} · Aim ${escapeHtml(next.label)}</strong>
+        <em data-climb-next-description>${escapeHtml(next.description || "Clear the correct lane or fall to ground level.")}</em>
       </div>
       <div class="climb-buttons">
         <button class="btn secondary" data-climb="left" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Left -${costs.side}</button>
@@ -310,7 +314,7 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
           <kbd>D</kbd><kbd>→</kbd><span>right</span>
         </div>
       ` : ""}
-      ${canClimb ? "" : `<p class="muted">No movement energy yet. Earn at least ${climbCost} points from questions or powers.</p>`}
+      <p class="muted" data-climb-message>${canClimb ? "Hold movement keys for smooth walking. Your point bank drains continuously." : `No movement energy yet. Earn at least ${climbCost} points from questions or powers.`}</p>
     </div>
   `;
 }
@@ -766,27 +770,129 @@ function mountInteractiveScenes() {
   if (stage) renderClimbScene(stage, climbPlayers(), currentParkTheme(), state.view === "climb" ? state.playerId : "");
 }
 
+function refreshClimbHud() {
+  if (state.view !== "climb") return;
+  const player = currentPlayer();
+  if (!player) return;
+  const next = player.nextObstacle || {};
+  const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 18, side: 9, back: 8 };
+  const pointsNode = document.querySelector("[data-climb-points]");
+  const nextNode = document.querySelector("[data-climb-next]");
+  const nextDescriptionNode = document.querySelector("[data-climb-next-description]");
+  const messageNode = document.querySelector("[data-climb-message]");
+  const navPointNode = document.querySelector(".game-nav-stats div:first-child strong");
+  const navHeightNode = document.querySelector(".game-nav-stats div:nth-child(2) strong");
+  const navNextNode = document.querySelector(".game-nav-stats div:nth-child(3) strong");
+
+  if (pointsNode) pointsNode.textContent = `${player.score || 0} pts`;
+  if (nextNode) nextNode.textContent = `${next.title || "Next obstacle"} · Aim ${next.label || "Forward"}`;
+  if (nextDescriptionNode) nextDescriptionNode.textContent = next.description || "Clear the correct lane or fall to ground level.";
+  if (messageNode) {
+    messageNode.textContent = state.error || ((player.score || 0) >= costs.back
+      ? "Hold movement keys for smooth walking. Your point bank drains continuously."
+      : `Movement energy empty. Answer more questions to refill your point bank.`);
+  }
+  if (navPointNode) navPointNode.textContent = player.score || 0;
+  if (navHeightNode) navHeightNode.textContent = `${Math.round(player.height || 0)} ft`;
+  if (navNextNode) navNextNode.textContent = next.label || "Forward";
+}
+
 async function attemptClimb(turn) {
   if (state.role !== "player" || !state.room || state.room.status === "finished") return;
+  if (climbMoveInFlight) return;
   const player = currentPlayer();
-  const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 12, side: 5, back: 4 };
+  const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 18, side: 9, back: 8 };
   const moveCost = turn === "left" || turn === "right" ? costs.side : turn === "back" ? costs.back : costs.forward;
   if (!player || player.score < moveCost) {
     state.error = `You need ${moveCost} points to move. Answer more questions to refill your point bank.`;
-    render();
+    if (state.view === "climb") refreshClimbHud();
+    else render();
     return;
   }
-  const reply = await api("/api/player/climb", {
-    roomCode: state.roomCode,
-    playerId: state.playerId,
-    turn
-  });
-  state.error = reply.ok ? "" : reply.error;
-  render();
+  climbMoveInFlight = true;
+  try {
+    const reply = await api("/api/player/climb", {
+      roomCode: state.roomCode,
+      playerId: state.playerId,
+      turn
+    });
+    state.error = reply.ok ? "" : reply.error;
+    if (reply.ok && reply.room) state.room = reply.room;
+    if (state.view === "climb") {
+      refreshClimbHud();
+      mountInteractiveScenes();
+    } else {
+      render();
+    }
+  } finally {
+    climbMoveInFlight = false;
+  }
+}
+
+function climbTurnFromKey(code) {
+  const keyMap = {
+    ArrowLeft: "left",
+    KeyA: "left",
+    ArrowRight: "right",
+    KeyD: "right",
+    ArrowUp: "straight",
+    KeyW: "straight",
+    Space: "straight",
+    ArrowDown: "back",
+    KeyS: "back"
+  };
+  return keyMap[code] || "";
+}
+
+function currentHeldClimbTurn() {
+  const side = heldClimbKeys.has("KeyA") || heldClimbKeys.has("ArrowLeft")
+    ? "left"
+    : heldClimbKeys.has("KeyD") || heldClimbKeys.has("ArrowRight")
+      ? "right"
+      : "";
+  const forwardBack = heldClimbKeys.has("KeyS") || heldClimbKeys.has("ArrowDown")
+    ? "back"
+    : heldClimbKeys.has("KeyW") || heldClimbKeys.has("ArrowUp") || heldClimbKeys.has("Space")
+      ? "straight"
+      : "";
+
+  if (side && forwardBack) {
+    const useSide = Date.now() % 260 < 90;
+    return useSide ? side : forwardBack;
+  }
+  return forwardBack || side;
+}
+
+function startClimbMovementLoop() {
+  if (climbMoveTimer) return;
+  const tick = async () => {
+    if (state.view !== "climb" || state.role !== "player" || !heldClimbKeys.size) {
+      stopClimbMovementLoop();
+      return;
+    }
+    const turn = currentHeldClimbTurn();
+    const now = Date.now();
+    if (turn && now - lastClimbInputAt >= 130) {
+      lastClimbInputAt = now;
+      await attemptClimb(turn);
+    }
+  };
+  tick();
+  climbMoveTimer = setInterval(tick, 55);
+}
+
+function stopClimbMovementLoop() {
+  if (!climbMoveTimer) return;
+  clearInterval(climbMoveTimer);
+  climbMoveTimer = null;
 }
 
 function render() {
   if (!state.deck) return;
+  if (state.view !== "climb") {
+    heldClimbKeys.clear();
+    stopClimbMovementLoop();
+  }
   const player = currentPlayer();
   if (state.view === "join") app.innerHTML = renderJoin();
   else if (state.view === "climb" && state.room) app.innerHTML = renderClimbMode();
@@ -824,6 +930,7 @@ app.addEventListener("click", async (event) => {
   }
 
   if (climb) {
+    heldClimbKeys.clear();
     await attemptClimb(climb);
     return;
   }
@@ -968,24 +1075,22 @@ app.addEventListener("change", (event) => {
 window.addEventListener("keydown", async (event) => {
   if (state.view !== "climb" || state.role !== "player" || !state.room || state.room.status === "finished") return;
   if (event.target?.matches?.("input, textarea, select")) return;
-  const now = Date.now();
-  if (now - lastClimbInputAt < 115) return;
-  lastClimbInputAt = now;
-  const keyMap = {
-    ArrowLeft: "left",
-    KeyA: "left",
-    ArrowRight: "right",
-    KeyD: "right",
-    ArrowUp: "straight",
-    KeyW: "straight",
-    Space: "straight",
-    ArrowDown: "back",
-    KeyS: "back"
-  };
-  const turn = keyMap[event.code];
+  const turn = climbTurnFromKey(event.code);
   if (!turn) return;
   event.preventDefault();
-  await attemptClimb(turn);
+  heldClimbKeys.add(event.code);
+  startClimbMovementLoop();
+});
+
+window.addEventListener("keyup", (event) => {
+  if (!heldClimbKeys.has(event.code)) return;
+  heldClimbKeys.delete(event.code);
+  if (heldClimbKeys.size === 0) stopClimbMovementLoop();
+});
+
+window.addEventListener("blur", () => {
+  heldClimbKeys.clear();
+  stopClimbMovementLoop();
 });
 
 app.addEventListener("input", async (event) => {
