@@ -14,7 +14,10 @@ const HOST = process.env.HOST || "0.0.0.0";
 
 const rooms = new Map();
 const subscribers = new Map();
-const CLIMB_COST = 300;
+const CLIMB_FORWARD_COST = 12;
+const CLIMB_SIDE_COST = 5;
+const CLIMB_BACK_COST = 4;
+const CLIMB_STEP_HEIGHT = 4;
 const CLIMB_HEIGHT = 24;
 const DEFAULT_GAME_DURATION_SECONDS = 20 * 60;
 const MIN_GAME_DURATION_SECONDS = 5 * 60;
@@ -190,39 +193,49 @@ function playerQuestion(question, includeChoices) {
   };
 }
 
-function questionDurationMs(room) {
-  const question = lessonDeck.questions[room.currentQuestionIndex];
+function questionDurationMs(room, player = null) {
+  const questionIndex = player?.currentQuestionIndex ?? room.currentQuestionIndex ?? 0;
+  const question = lessonDeck.questions[questionIndex];
   return Math.max(1000, Number(question?.timeLimitSeconds || 45) * 1000);
 }
 
-function resetPlayerQuestionTimer(room, player) {
-  player.questionTimeLeftMs = questionDurationMs(room);
+function startPlayerQuestion(room, player, questionIndex = 0) {
+  const boundedIndex = Math.min(lessonDeck.questions.length - 1, Math.max(0, Number(questionIndex) || 0));
+  player.currentQuestionIndex = boundedIndex;
+  player.phase = "answering";
+  player.answer = null;
+  player.lastResult = null;
+  player.questionStartedAt = Date.now();
+  player.questionTimeLeftMs = questionDurationMs(room, player);
   player.questionTimerStartedAt = Date.now();
   player.questionPaused = false;
   player.questionTimedOut = false;
+  player.powerUsedQuestion = -1;
 }
 
 function visibleQuestionTimeLeft(room, player) {
-  if (room.status !== "answering") return null;
-  const stored = Number(player.questionTimeLeftMs ?? questionDurationMs(room));
-  if (room.answers.has(player.id) || player.questionPaused || !player.questionTimerStartedAt) {
+  if (room.status !== "answering" || player.phase !== "answering") return null;
+  const stored = Number(player.questionTimeLeftMs ?? questionDurationMs(room, player));
+  if (player.answer || player.questionPaused || !player.questionTimerStartedAt) {
     return Math.max(0, Math.ceil(stored));
   }
   return Math.max(0, Math.ceil(stored - (Date.now() - player.questionTimerStartedAt)));
 }
 
 function markPlayerTimedOut(room, player, now = Date.now()) {
-  if (room.answers.has(player.id)) return;
+  if (player.phase !== "answering" || player.answer) return;
   player.questionTimeLeftMs = 0;
   player.questionTimerStartedAt = now;
   player.questionPaused = false;
   player.questionTimedOut = true;
-  room.answers.set(player.id, {
+  player.answer = {
     choiceId: null,
     answeredAt: now,
-    responseMs: questionDurationMs(room),
+    responseMs: questionDurationMs(room, player),
     timedOut: true
-  });
+  };
+  player.lastResult = computePlayerResult(room, player, player.answer);
+  player.phase = "results";
   room.actionLog.push(`${player.name}'s question timer ended before they answered.`);
 }
 
@@ -232,8 +245,8 @@ function settleExpiredPlayerTimers(room) {
   let changed = false;
 
   for (const player of room.players.values()) {
-    if (room.answers.has(player.id)) continue;
-    if (player.questionTimeLeftMs == null) resetPlayerQuestionTimer(room, player);
+    if (player.phase !== "answering" || player.answer) continue;
+    if (player.questionTimeLeftMs == null) startPlayerQuestion(room, player, player.currentQuestionIndex || 0);
     if (player.questionPaused) continue;
 
     const elapsed = Math.max(0, now - (player.questionTimerStartedAt || now));
@@ -246,17 +259,12 @@ function settleExpiredPlayerTimers(room) {
     }
   }
 
-  if (room.players.size > 0 && room.answers.size >= room.players.size) {
-    closeQuestion(room);
-    return true;
-  }
-
   if (changed) publish(room);
   return changed;
 }
 
 function pausePlayerQuestionTimer(room, player) {
-  if (room.status !== "answering" || room.answers.has(player.id)) return;
+  if (room.status !== "answering" || player.phase !== "answering" || player.answer) return;
   player.questionTimeLeftMs = visibleQuestionTimeLeft(room, player);
   player.questionTimerStartedAt = Date.now();
   player.questionPaused = true;
@@ -264,7 +272,7 @@ function pausePlayerQuestionTimer(room, player) {
 }
 
 function resumePlayerQuestionTimer(room, player) {
-  if (room.status !== "answering" || room.answers.has(player.id)) return;
+  if (room.status !== "answering" || player.phase !== "answering" || player.answer) return;
   const timeLeft = visibleQuestionTimeLeft(room, player);
   if (timeLeft <= 0) {
     markPlayerTimedOut(room, player);
@@ -276,8 +284,39 @@ function resumePlayerQuestionTimer(room, player) {
   player.questionTimedOut = false;
 }
 
+function publicPlayer(room, player) {
+  const questionIndex = player.currentQuestionIndex ?? room.currentQuestionIndex ?? 0;
+  const question = lessonDeck.questions[questionIndex] || null;
+  const phase = player.phase || (room.status === "answering" ? "answering" : room.status);
+  return {
+    id: player.id,
+    name: player.name,
+    score: player.score,
+    height: player.height ?? 0,
+    avatar: player.avatar || "mickey",
+    direction: player.direction ?? 0,
+    lastClimbAt: player.lastClimbAt || null,
+    nextObstacle: nextObstacleFor(room, player),
+    falls: player.falls || 0,
+    streak: player.streak,
+    phase,
+    currentQuestionIndex: questionIndex,
+    answered: phase === "results" || phase === "finished" || Boolean(player.answer),
+    frozenNext: player.frozenQuestionIndex === questionIndex + 1 || player.frozenQuestionIndex === questionIndex,
+    powerUsedThisRound: player.powerUsedQuestion === questionIndex,
+    questionStartedAt: player.questionStartedAt || null,
+    questionTimeLeftMs: visibleQuestionTimeLeft(room, player),
+    questionPaused: Boolean(player.questionPaused),
+    questionTimedOut: Boolean(player.questionTimedOut),
+    question: question ? playerQuestion(question, room.status === "answering" && phase === "answering") : null,
+    lastResult: player.lastResult || null,
+    connected: true
+  };
+}
+
 function publicRoom(room) {
-  const question = lessonDeck.questions[room.currentQuestionIndex] || null;
+  const firstActive = [...room.players.values()].find((player) => player.phase === "answering") || [...room.players.values()][0];
+  const question = firstActive ? lessonDeck.questions[firstActive.currentQuestionIndex || 0] : lessonDeck.questions[room.currentQuestionIndex] || null;
   const now = Date.now();
   return {
     code: room.code,
@@ -293,28 +332,16 @@ function publicRoom(room) {
     gameEndsAt: room.gameEndsAt || null,
     gameSecondsLeft: room.gameEndsAt ? Math.max(0, Math.ceil((room.gameEndsAt - now) / 1000)) : null,
     claimedAvatars: [...room.players.values()].map((player) => player.avatar),
-    climbCost: CLIMB_COST,
-    climbHeight: CLIMB_HEIGHT,
-    players: [...room.players.values()].map((player) => ({
-      id: player.id,
-      name: player.name,
-      score: player.score,
-      height: player.height ?? 0,
-      avatar: player.avatar || "mickey",
-      direction: player.direction ?? 0,
-      lastClimbAt: player.lastClimbAt || null,
-      nextObstacle: nextObstacleFor(room, player),
-      falls: player.falls || 0,
-      streak: player.streak,
-      answered: Boolean(room.answers.get(player.id)),
-      frozenNext: player.frozenQuestionIndex === room.currentQuestionIndex + 1 || player.frozenQuestionIndex === room.currentQuestionIndex,
-      powerUsedThisRound: player.powerUsedQuestion === room.currentQuestionIndex,
-      questionTimeLeftMs: visibleQuestionTimeLeft(room, player),
-      questionPaused: Boolean(player.questionPaused),
-      questionTimedOut: Boolean(player.questionTimedOut),
-      connected: true
-    })),
-    question: question ? playerQuestion(question, room.status === "answering") : null,
+    climbCost: CLIMB_FORWARD_COST,
+    climbHeight: CLIMB_STEP_HEIGHT,
+    obstacleHeight: CLIMB_HEIGHT,
+    climbCosts: {
+      forward: CLIMB_FORWARD_COST,
+      side: CLIMB_SIDE_COST,
+      back: CLIMB_BACK_COST
+    },
+    players: [...room.players.values()].map((player) => publicPlayer(room, player)),
+    question: question ? playerQuestion(question, false) : null,
     lastResults: room.lastResults,
     actionLog: (room.actionLog || []).slice(-6)
   };
@@ -332,6 +359,74 @@ function subscribe(code, res) {
     subscribers.get(code)?.delete(res);
     if (subscribers.get(code)?.size === 0) subscribers.delete(code);
   });
+}
+
+function computePlayerResult(room, player, answer) {
+  const questionIndex = player.currentQuestionIndex ?? 0;
+  const question = lessonDeck.questions[questionIndex];
+  if (!question) return null;
+  const correctChoice = question.choices.find((choice) => choice.correct);
+  const selected = question.choices.find((choice) => choice.id === answer?.choiceId);
+  const isCorrect = Boolean(selected?.correct);
+  const basePoints = question.pointValue ?? 1000;
+  const bonusPoints = question.bonusPoints ?? 150;
+  const responseMs = answer ? Math.max(0, answer.responseMs ?? (answer.answeredAt - player.questionStartedAt)) : null;
+  let pointsAwarded = 0;
+  let speedBonus = 0;
+  let streakBonus = 0;
+  let badgeBonus = 0;
+  let frozenPenalty = false;
+  player.height ??= 0;
+  player.direction ??= 0;
+
+  if (isCorrect) {
+    const maxMs = question.timeLimitSeconds * 1000;
+    const speedRatio = Math.max(0, maxMs - responseMs) / maxMs;
+    frozenPenalty = player.frozenQuestionIndex === questionIndex;
+    speedBonus = frozenPenalty ? 0 : Math.round(speedRatio * Math.round(basePoints * 0.5));
+    player.streak += 1;
+    streakBonus = Math.min(player.streak * 75, 300);
+    badgeBonus = player.streak >= 3 ? bonusPoints : 0;
+    pointsAwarded = basePoints + speedBonus + streakBonus + badgeBonus;
+    player.score += pointsAwarded;
+  } else {
+    player.streak = 0;
+  }
+
+  if (player.frozenQuestionIndex === questionIndex) {
+    player.frozenQuestionIndex = null;
+  }
+
+  return {
+    id: player.id,
+    name: player.name,
+    questionIndex,
+    questionId: question.id,
+    pointValue: basePoints,
+    bonusPoints,
+    bonusLabel: question.bonusLabel ?? "Castle streak bonus",
+    correctChoiceId: correctChoice?.id,
+    correctText: correctChoice?.text || "",
+    explanation: question.explanation,
+    workedSolution: question.workedSolution,
+    selectedChoiceId: answer?.choiceId || null,
+    selectedText: selected?.text || (answer?.timedOut ? "Timed out" : "No answer"),
+    isCorrect,
+    responseMs,
+    score: player.score,
+    height: player.height ?? 0,
+    avatar: player.avatar || "mickey",
+    direction: player.direction ?? 0,
+    nextObstacle: nextObstacleFor(room, player),
+    falls: player.falls || 0,
+    streak: player.streak,
+    pointsAwarded,
+    movesAvailable: Math.floor(player.score / CLIMB_FORWARD_COST),
+    speedBonus,
+    streakBonus,
+    badgeBonus,
+    frozenPenalty
+  };
 }
 
 function computeResults(room) {
@@ -387,7 +482,7 @@ function computeResults(room) {
       falls: player.falls || 0,
       streak: player.streak,
       pointsAwarded,
-      climbsAvailable: Math.floor(player.score / CLIMB_COST),
+      movesAvailable: Math.floor(player.score / CLIMB_FORWARD_COST),
       speedBonus,
       streakBonus,
       badgeBonus,
@@ -450,7 +545,7 @@ function startQuestion(room) {
   room.answers = new Map();
   room.lastResults = null;
   room.questionStartedAt = Date.now();
-  for (const player of room.players.values()) resetPlayerQuestionTimer(room, player);
+  for (const player of room.players.values()) startPlayerQuestion(room, player, 0);
   room.timer = setInterval(() => {
     if (room.gameEndsAt && Date.now() >= room.gameEndsAt) {
       finishGame(room);
@@ -462,23 +557,20 @@ function startQuestion(room) {
 }
 
 function syncLastResultScores(room) {
-  if (!room.lastResults) return;
-  const playersById = new Map(room.players);
-  room.lastResults.playerResults = room.lastResults.playerResults.map((result) => {
-    const player = playersById.get(result.id);
-    return player ? {
-      ...result,
+  for (const player of room.players.values()) {
+    if (!player.lastResult) continue;
+    player.lastResult = {
+      ...player.lastResult,
       score: player.score,
       height: player.height,
       direction: player.direction ?? 0,
       nextObstacle: nextObstacleFor(room, player),
       falls: player.falls || 0,
       streak: player.streak,
-      climbsAvailable: Math.floor(player.score / CLIMB_COST)
-    } : result;
-  });
-  room.lastResults.playerResults.sort((a, b) => b.height - a.height || b.score - a.score);
-  room.lastResults.powerLog = (room.actionLog || []).slice(-6);
+      movesAvailable: Math.floor(player.score / CLIMB_FORWARD_COST),
+      powerLog: (room.actionLog || []).slice(-6)
+    };
+  }
 }
 
 function findTopRival(room, actor) {
@@ -488,14 +580,13 @@ function findTopRival(room, actor) {
 }
 
 function usePlayerPower(room, playerId, power) {
-  if (room.status !== "results") {
-    throw new Error("Power moves can only be used on the results screen.");
-  }
-
   const actor = room.players.get(playerId);
   if (!actor) throw new Error("Player session not recognized.");
+  if (actor.phase !== "results") {
+    throw new Error("Power moves unlock after you answer a question.");
+  }
   if (room.players.size < 2) throw new Error("Power moves need at least two players.");
-  if (actor.powerUsedQuestion === room.currentQuestionIndex) {
+  if (actor.powerUsedQuestion === actor.currentQuestionIndex) {
     throw new Error("You already used a power move this round.");
   }
 
@@ -512,7 +603,7 @@ function usePlayerPower(room, playerId, power) {
     room.actionLog.push(`${actor.name} stole ${amount} climb-bank points from ${topRival.name}.`);
   } else if (normalizedPower === "freeze") {
     if (actor.streak < 4) throw new Error("Freeze unlocks at a 4-question streak.");
-    topRival.frozenQuestionIndex = room.currentQuestionIndex + 1;
+    topRival.frozenQuestionIndex = (topRival.currentQuestionIndex ?? 0) + 1;
     room.actionLog.push(`${actor.name} froze ${topRival.name}'s next speed bonus.`);
   } else if (normalizedPower === "nuke") {
     if (actor.streak < 5) throw new Error("Nuke unlocks at a 5-question streak.");
@@ -530,7 +621,7 @@ function usePlayerPower(room, playerId, power) {
     throw new Error("Unknown power move.");
   }
 
-  actor.powerUsedQuestion = room.currentQuestionIndex;
+  actor.powerUsedQuestion = actor.currentQuestionIndex;
   syncLastResultScores(room);
   publish(room);
 }
@@ -539,27 +630,56 @@ function useClimb(room, playerId, turn) {
   if (room.status === "finished") throw new Error("The overall park timer ended.");
   const player = room.players.get(playerId);
   if (!player) throw new Error("Player session not recognized.");
-  if (player.score < CLIMB_COST) {
-    throw new Error(`You need ${CLIMB_COST} points to climb. Answer more questions to refill your point bank.`);
+  const action = String(turn || "forward").toLowerCase();
+  const isLeft = action === "left";
+  const isRight = action === "right";
+  const isBack = action === "back" || action === "backward" || action === "down";
+  const isForward = !isLeft && !isRight && !isBack;
+  const cost = isForward ? CLIMB_FORWARD_COST : isBack ? CLIMB_BACK_COST : CLIMB_SIDE_COST;
+  if (player.score < cost) {
+    throw new Error(`You need ${cost} points to move. Answer more questions to refill your point bank.`);
   }
 
-  const turnValue = sanitizeTurn(turn);
-  const chosenTurn = turnName(turnValue);
-  const obstacle = nextObstacleFor(room, player);
-  player.score -= CLIMB_COST;
+  player.score -= cost;
   player.lastClimbAt = Date.now();
+  player.height ??= 0;
+  player.direction ??= 0;
 
-  if (chosenTurn !== obstacle.turn) {
+  if (isLeft || isRight) {
+    player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -1 : 1)));
+    room.actionLog.push(`${player.name} shifted ${isLeft ? "left" : "right"} and spent ${cost} movement points.`);
+  } else if (isBack) {
+    player.height = Math.max(0, (player.height || 0) - Math.max(2, Math.floor(CLIMB_STEP_HEIGHT * 0.75)));
+    room.actionLog.push(`${player.name} backed up safely and spent ${cost} movement points.`);
+  } else {
+    const oldHeight = player.height || 0;
+    const oldStep = Math.floor(oldHeight / CLIMB_HEIGHT);
+    const obstacle = nextObstacleFor(room, player);
+    const expectedLane = obstacle.turnValue;
+    player.height = oldHeight + CLIMB_STEP_HEIGHT;
+    const newStep = Math.floor(player.height / CLIMB_HEIGHT);
+    const currentLane = Math.max(-1, Math.min(1, Math.sign(player.direction || 0)));
+    const laneMatched = currentLane === expectedLane;
+
+    if (newStep > oldStep && !laneMatched) {
+      player.height = 0;
+      player.direction = 0;
+      player.falls = (player.falls || 0) + 1;
+      room.actionLog.push(`${player.name} clipped ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
+    } else if (newStep > oldStep) {
+      const turnLabel = expectedLane < 0 ? "left" : expectedLane > 0 ? "right" : "center";
+      room.actionLog.push(`${player.name} cleared ${obstacle.title} in the ${turnLabel} lane and kept climbing.`);
+    } else {
+      room.actionLog.push(`${player.name} moved forward and spent ${cost} movement points.`);
+    }
+  }
+
+  if (player.height < 0) {
     const oldHeight = player.height || 0;
     player.height = 0;
     player.direction = 0;
     player.falls = (player.falls || 0) + 1;
-    room.actionLog.push(`${player.name} missed ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
-  } else {
-    player.height = (player.height || 0) + CLIMB_HEIGHT;
-    player.direction = (player.direction || 0) + turnValue;
-    const turnLabel = turnValue < 0 ? "left" : turnValue > 0 ? "right" : "forward";
-    room.actionLog.push(`${player.name} spent ${CLIMB_COST} points, cleared ${obstacle.title}, turned ${turnLabel}, and climbed ${CLIMB_HEIGHT} ft.`);
+    room.actionLog.push(`${player.name} fell from ${Math.round(oldHeight)} ft and reset to ground level.`);
   }
   syncLastResultScores(room);
   publish(room);
@@ -681,10 +801,19 @@ async function handleApi(req, res) {
         lastClimbAt: null,
         falls: 0,
         streak: 0,
+        phase: room.status === "answering" ? "answering" : "lobby",
+        currentQuestionIndex: 0,
+        questionStartedAt: null,
+        questionTimeLeftMs: null,
+        questionTimerStartedAt: null,
+        questionPaused: false,
+        questionTimedOut: false,
+        answer: null,
+        lastResult: null,
         frozenQuestionIndex: null,
         powerUsedQuestion: -1
       };
-      if (room.status === "answering") resetPlayerQuestionTimer(room, player);
+      if (room.status === "answering") startPlayerQuestion(room, player, 0);
       room.players.set(playerId, player);
       sendJson(res, 200, { ok: true, playerId, room: publicRoom(room), deck: lessonDeck });
       publish(room);
@@ -704,22 +833,16 @@ async function handleApi(req, res) {
     if (route === "/api/host/reveal") {
       const room = requireRoom(body.roomCode);
       requireHost(room, body.hostSecret);
-      closeQuestion(room);
-      sendJson(res, 200, { ok: true });
+      publish(room);
+      sendJson(res, 200, { ok: true, note: "Players now reveal and advance independently." });
       return;
     }
 
     if (route === "/api/host/next") {
       const room = requireRoom(body.roomCode);
       requireHost(room, body.hostSecret);
-      if (room.currentQuestionIndex >= lessonDeck.questions.length - 1) {
-        finishGame(room);
-        sendJson(res, 200, { ok: true, finished: true });
-        return;
-      }
-      room.currentQuestionIndex += 1;
-      startQuestion(room);
-      sendJson(res, 200, { ok: true });
+      publish(room);
+      sendJson(res, 200, { ok: true, note: "Players now choose their own next mission." });
       return;
     }
 
@@ -728,22 +851,47 @@ async function handleApi(req, res) {
       if (room.status !== "answering") throw new Error("This question is not accepting answers.");
       const player = room.players.get(body.playerId);
       if (!player) throw new Error("Player session not recognized.");
-      if (room.answers.has(body.playerId)) throw new Error("You already answered this question.");
+      if (player.phase !== "answering") throw new Error("Move to your next mission when you are ready.");
+      if (player.answer) throw new Error("You already answered this question.");
       if (player.questionPaused) throw new Error("Return to the quiz screen before answering.");
       settleExpiredPlayerTimers(room);
-      if (room.status !== "answering") throw new Error("Your question timer already ended.");
-      if (room.answers.has(body.playerId)) throw new Error("Your question timer already ended.");
-      const question = lessonDeck.questions[room.currentQuestionIndex];
+      if (player.phase !== "answering" || player.answer) throw new Error("Your question timer already ended.");
+      const question = lessonDeck.questions[player.currentQuestionIndex];
       if (!question.choices.some((choice) => choice.id === body.choiceId)) throw new Error("Choice not found.");
       const now = Date.now();
       const timeLeft = visibleQuestionTimeLeft(room, player);
-      const responseMs = Math.max(0, questionDurationMs(room) - timeLeft);
+      const responseMs = Math.max(0, questionDurationMs(room, player) - timeLeft);
       player.questionTimeLeftMs = timeLeft;
       player.questionTimerStartedAt = now;
-      room.answers.set(body.playerId, { choiceId: body.choiceId, answeredAt: now, responseMs });
-      if (room.answers.size >= room.players.size && room.players.size > 0) closeQuestion(room);
-      else publish(room);
-      sendJson(res, 200, { ok: true });
+      player.answer = { choiceId: body.choiceId, answeredAt: now, responseMs };
+      player.questionPaused = false;
+      player.lastResult = computePlayerResult(room, player, player.answer);
+      player.phase = "results";
+      publish(room);
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
+      return;
+    }
+
+    if (route === "/api/player/next") {
+      const room = requireRoom(body.roomCode);
+      if (room.status !== "answering") throw new Error("The live session is not running.");
+      const player = room.players.get(body.playerId);
+      if (!player) throw new Error("Player session not recognized.");
+      if (player.phase === "answering" && !player.answer) {
+        throw new Error("Answer or wait for your timer before moving on.");
+      }
+      const nextIndex = (player.currentQuestionIndex ?? 0) + 1;
+      if (nextIndex >= lessonDeck.questions.length) {
+        player.phase = "finished";
+        player.questionPaused = false;
+        player.questionTimeLeftMs = null;
+        publish(room);
+        sendJson(res, 200, { ok: true, finished: true, room: publicRoom(room) });
+        return;
+      }
+      startPlayerQuestion(room, player, nextIndex);
+      publish(room);
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
       return;
     }
 
@@ -759,8 +907,7 @@ async function handleApi(req, res) {
       } else {
         throw new Error("Mode not recognized.");
       }
-      if (room.status === "answering" && room.players.size > 0 && room.answers.size >= room.players.size) closeQuestion(room);
-      else publish(room);
+      publish(room);
       sendJson(res, 200, { ok: true, room: publicRoom(room) });
       return;
     }

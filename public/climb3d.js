@@ -525,12 +525,17 @@ function createScene(THREE, container) {
       const mesh = playerMeshes.get(player.id) || makeClimber(player);
       playerMeshes.set(player.id, mesh);
       const point = playerRoutePoint(player);
-      mesh.position.set(point.x, point.y + 0.45, point.z);
+      const targetPosition = new THREE.Vector3(point.x, point.y + 0.45, point.z);
+      if (!mesh.userData.targetPosition) {
+        mesh.userData.targetPosition = targetPosition.clone();
+        mesh.position.copy(targetPosition);
+      } else {
+        mesh.userData.targetPosition.copy(targetPosition);
+      }
       mesh.rotation.y = point.yaw + Math.PI / 2;
       mesh.userData.targetHeight = player.height;
       mesh.userData.answered = player.answered;
       mesh.userData.falling = player.height === 0 && (player.falls || 0) > 0;
-      mesh.userData.baseY = point.y + 0.45;
       mesh.userData.lastClimbAt = player.lastClimbAt;
     });
 
@@ -567,7 +572,12 @@ function createScene(THREE, container) {
       const jumpAge = mesh.userData.lastClimbAt ? Date.now() - mesh.userData.lastClimbAt : 9999;
       const jumpLift = jumpAge < 680 ? Math.sin((jumpAge / 680) * Math.PI) * 0.48 : 0;
       const bob = Math.sin(frame * 5 + index) * 0.035;
-      mesh.position.y = (mesh.userData.baseY || mesh.position.y) + bob + jumpLift;
+      const target = mesh.userData.targetPosition;
+      if (target) {
+        mesh.position.x += (target.x - mesh.position.x) * 0.18;
+        mesh.position.z += (target.z - mesh.position.z) * 0.18;
+        mesh.position.y += (target.y + bob + jumpLift - mesh.position.y) * 0.22;
+      }
       mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
       mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
     });
