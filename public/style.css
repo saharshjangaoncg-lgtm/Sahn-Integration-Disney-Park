@@ -869,6 +869,109 @@ select optgroup {
   gap: 18px;
 }
 
+.game-nav {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 1.6fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(187, 247, 208, 0.18), rgba(255, 255, 255, 0.05)),
+    rgba(48, 52, 60, 0.96);
+  border: 1px solid color-mix(in srgb, var(--course-color, #7b5aa6), white 18%);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.16);
+}
+
+.game-nav-title {
+  display: grid;
+  gap: 6px;
+}
+
+.game-nav-title strong {
+  font-size: clamp(1.08rem, 2vw, 1.45rem);
+  line-height: 1.05;
+}
+
+.game-nav-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.game-nav-stats div {
+  min-height: 56px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #173126;
+  background:
+    linear-gradient(135deg, rgba(187, 247, 208, 0.96), rgba(255, 255, 255, 0.88));
+  border: 1px solid rgba(34, 197, 94, 0.22);
+}
+
+.game-nav-stats span {
+  color: #4b635b;
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.game-nav-stats strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #173126;
+  font-size: 1rem;
+}
+
+.game-nav-actions {
+  display: flex;
+  justify-content: end;
+}
+
+.climb-mode-page {
+  display: grid;
+  gap: 16px;
+}
+
+.climb-mode-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 8% 12%, color-mix(in srgb, var(--course-color), transparent 68%), transparent 12rem),
+    linear-gradient(135deg, rgba(48, 52, 60, 0.98), rgba(37, 40, 47, 0.94));
+  border: 1px solid var(--line);
+}
+
+.climb-mode-hero h2 {
+  margin: 8px 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  line-height: 1.02;
+}
+
+.control-card {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 7px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  color: #173126;
+  background: linear-gradient(135deg, #bbf7d0, #ffffff);
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  font-weight: 900;
+}
+
 .climb-shell {
   grid-column: 1 / -1;
   min-height: 440px;
@@ -883,6 +986,20 @@ select optgroup {
     rgba(48, 52, 60, 0.94);
   border: 1px solid var(--line);
   box-shadow: 0 16px 34px rgba(0, 0, 0, 0.18);
+}
+
+.climb-shell-immersive {
+  min-height: 680px;
+  grid-template-columns: minmax(280px, 0.58fr) minmax(0, 1.42fr);
+}
+
+.climb-shell-immersive .climb-stage {
+  min-height: 640px;
+  cursor: grab;
+}
+
+.climb-shell-immersive .climb-stage:active {
+  cursor: grabbing;
 }
 
 .climb-copy {
@@ -1516,8 +1633,22 @@ kbd {
   .stats-strip,
   .score-breakdown,
   .climb-shell,
-  .power-grid {
+  .power-grid,
+  .game-nav,
+  .climb-mode-hero {
     grid-template-columns: 1fr;
+  }
+
+  .game-nav-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .game-nav-actions {
+    justify-content: stretch;
+  }
+
+  .game-nav-actions .btn {
+    width: 100%;
   }
 
   .avatar-picker {
@@ -1535,6 +1666,10 @@ kbd {
 
   .climb-stage {
     min-height: 360px;
+  }
+
+  .climb-shell-immersive .climb-stage {
+    min-height: 440px;
   }
 
   .hero-skyline {

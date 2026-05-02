@@ -66,7 +66,7 @@ export function getAvatar(id) {
   return getAvatarById(id);
 }
 
-export function renderClimbScene(container, climbers, courseId = "castle") {
+export function renderClimbScene(container, climbers, courseId = "castle", focusPlayerId = "") {
   if (!container) return;
   const safeClimbers = normalizeClimbers(climbers);
   if (!threeModulePromise) {
@@ -77,7 +77,7 @@ export function renderClimbScene(container, climbers, courseId = "castle") {
     .then((THREE) => {
       const scene = scenes.get(container) || createScene(THREE, container);
       scenes.set(container, scene);
-      scene.update(safeClimbers, courseId);
+      scene.update(safeClimbers, courseId, focusPlayerId);
     })
     .catch(() => renderFallback(container, safeClimbers));
 }
@@ -132,6 +132,14 @@ function createScene(THREE, container) {
   const levelGap = 0.52;
   let activeCourse = "";
   let cameraTarget = new THREE.Vector3(0, 1, 0);
+  let cameraBasePosition = new THREE.Vector3(6.5, 7, 12);
+  let lookYaw = 0;
+  let lookPitch = 0;
+  let draggingLook = false;
+  let lastPointerX = 0;
+  let lastPointerY = 0;
+  let focusedRoutePoint = null;
+  const focusedTarget = new THREE.Vector3();
 
   function material(color, options = {}) {
     return new THREE.MeshStandardMaterial({
@@ -154,6 +162,17 @@ function createScene(THREE, container) {
     const z = zLane + Math.sin(step * 0.44) * 0.24 + Math.max(-2, Math.min(2, lane)) * laneWidth;
     const y = step * levelGap - 2.4;
     return { x, y, z, yaw: direction > 0 ? 0 : Math.PI };
+  }
+
+  function updateFocusedCameraBase() {
+    if (!focusedRoutePoint) return;
+    const cameraAngle = focusedRoutePoint.yaw + Math.PI + lookYaw;
+    const distance = 4.65;
+    cameraBasePosition.set(
+      focusedTarget.x + Math.cos(cameraAngle) * distance,
+      focusedTarget.y + 2.15 + lookPitch,
+      focusedTarget.z + Math.sin(cameraAngle) * distance
+    );
   }
 
   function buildCourse(courseId) {
@@ -268,6 +287,33 @@ function createScene(THREE, container) {
   }
 
   buildCourse("castle");
+
+  canvasHost.addEventListener("pointerdown", (event) => {
+    draggingLook = true;
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+    canvasHost.setPointerCapture?.(event.pointerId);
+  });
+
+  canvasHost.addEventListener("pointermove", (event) => {
+    if (!draggingLook) return;
+    const dx = event.clientX - lastPointerX;
+    const dy = event.clientY - lastPointerY;
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+    lookYaw += dx * 0.006;
+    lookPitch = Math.max(-0.9, Math.min(1.05, lookPitch + dy * 0.006));
+    updateFocusedCameraBase();
+  });
+
+  canvasHost.addEventListener("pointerup", (event) => {
+    draggingLook = false;
+    canvasHost.releasePointerCapture?.(event.pointerId);
+  });
+
+  canvasHost.addEventListener("pointerleave", () => {
+    draggingLook = false;
+  });
 
   const labelLayer = document.createElement("div");
   labelLayer.className = "climb-label-layer";
@@ -390,24 +436,40 @@ function createScene(THREE, container) {
     }
   }
 
-  function update(climbers, courseId = "castle") {
+  function playerRoutePoint(player) {
+    const loopHeight = player.height % loopFeet;
+    const step = Math.min(platformCount - 1, Math.floor(loopHeight / 24));
+    const lane = Math.max(-2, Math.min(2, player.direction || 0));
+    return routePoint(step, lane);
+  }
+
+  function update(climbers, courseId = "castle", focusPlayerId = "") {
     size();
     if (courseId !== activeCourse) buildCourse(courseId);
     const active = new Set();
-    const leaderHeight = Math.max(120, ...climbers.map((player) => player.height));
-    const leaderStep = Math.floor((leaderHeight % loopFeet) / 24);
-    const leaderPoint = routePoint(Math.min(platformCount - 1, leaderStep), 0);
-    camera.position.set(leaderPoint.x + 5.8, leaderPoint.y + 5.4, leaderPoint.z + 8.2);
-    cameraTarget.set(leaderPoint.x, leaderPoint.y + 1.4, leaderPoint.z);
+    const focusPlayer = climbers.find((player) => player.id === focusPlayerId) || null;
+
+    if (focusPlayer) {
+      const point = playerRoutePoint(focusPlayer);
+      const target = new THREE.Vector3(point.x, point.y + 0.82, point.z);
+      cameraTarget.copy(target);
+      focusedRoutePoint = point;
+      focusedTarget.copy(target);
+      updateFocusedCameraBase();
+    } else {
+      focusedRoutePoint = null;
+      const leaderHeight = Math.max(120, ...climbers.map((player) => player.height));
+      const leaderStep = Math.floor((leaderHeight % loopFeet) / 24);
+      const leaderPoint = routePoint(Math.min(platformCount - 1, leaderStep), 0);
+      cameraTarget.set(leaderPoint.x, leaderPoint.y + 1.4, leaderPoint.z);
+      cameraBasePosition.set(leaderPoint.x + 5.8, leaderPoint.y + 5.4, leaderPoint.z + 8.2);
+    }
 
     climbers.forEach((player, index) => {
       active.add(player.id);
       const mesh = playerMeshes.get(player.id) || makeClimber(player);
       playerMeshes.set(player.id, mesh);
-      const loopHeight = player.height % loopFeet;
-      const step = Math.min(platformCount - 1, Math.floor(loopHeight / 24));
-      const lane = Math.max(-2, Math.min(2, player.direction || 0));
-      const point = routePoint(step, lane);
+      const point = playerRoutePoint(player);
       mesh.position.set(point.x, point.y + 0.45, point.z);
       mesh.rotation.y = point.yaw + Math.PI / 2;
       mesh.userData.targetHeight = player.height;
@@ -454,6 +516,7 @@ function createScene(THREE, container) {
       mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
       mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
     });
+    camera.position.lerp(cameraBasePosition, 0.16);
     camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   }
