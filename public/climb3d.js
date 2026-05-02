@@ -517,9 +517,14 @@ function createScene(THREE, container) {
     if (focusPlayer) {
       const point = playerRoutePoint(focusPlayer);
       const target = new THREE.Vector3(point.x, point.y + 0.82, point.z);
-      cameraTarget.copy(target);
+      if (!focusedRoutePoint) {
+        cameraTarget.copy(target);
+        focusedTarget.copy(target);
+      } else {
+        cameraTarget.lerp(target, 0.26);
+        focusedTarget.lerp(target, 0.26);
+      }
       focusedRoutePoint = point;
-      focusedTarget.copy(target);
       updateFocusedCameraBase();
     } else {
       focusedRoutePoint = null;
@@ -539,10 +544,11 @@ function createScene(THREE, container) {
       if (!mesh.userData.targetPosition) {
         mesh.userData.targetPosition = targetPosition.clone();
         mesh.position.copy(targetPosition);
+        mesh.rotation.y = point.yaw + Math.PI / 2;
       } else {
         mesh.userData.targetPosition.copy(targetPosition);
       }
-      mesh.rotation.y = point.yaw + Math.PI / 2;
+      mesh.userData.targetYaw = point.yaw + Math.PI / 2;
       mesh.userData.targetHeight = player.height;
       mesh.userData.answered = player.answered;
       mesh.userData.falling = player.height === 0 && (player.falls || 0) > 0;
@@ -580,18 +586,22 @@ function createScene(THREE, container) {
     players.rotation.y = tower.rotation.y;
     players.children.forEach((mesh, index) => {
       const jumpAge = mesh.userData.lastClimbAt ? Date.now() - mesh.userData.lastClimbAt : 9999;
-      const jumpLift = jumpAge < 680 ? Math.sin((jumpAge / 680) * Math.PI) * 0.48 : 0;
+      const jumpLift = jumpAge < 780 ? Math.sin((jumpAge / 780) * Math.PI) * 0.78 : 0;
       const bob = Math.sin(frame * 5 + index) * 0.035;
       const target = mesh.userData.targetPosition;
       if (target) {
-        mesh.position.x += (target.x - mesh.position.x) * 0.18;
-        mesh.position.z += (target.z - mesh.position.z) * 0.18;
-        mesh.position.y += (target.y + bob + jumpLift - mesh.position.y) * 0.22;
+        mesh.position.x += (target.x - mesh.position.x) * 0.13;
+        mesh.position.z += (target.z - mesh.position.z) * 0.13;
+        mesh.position.y += (target.y + bob + jumpLift - mesh.position.y) * 0.16;
+      }
+      if (typeof mesh.userData.targetYaw === "number") {
+        const yawDelta = Math.atan2(Math.sin(mesh.userData.targetYaw - mesh.rotation.y), Math.cos(mesh.userData.targetYaw - mesh.rotation.y));
+        mesh.rotation.y += yawDelta * 0.14;
       }
       mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
       mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
     });
-    camera.position.lerp(cameraBasePosition, 0.16);
+    camera.position.lerp(cameraBasePosition, 0.08);
     camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   }

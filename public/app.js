@@ -23,8 +23,10 @@ const state = {
 };
 let lastClimbInputAt = 0;
 let climbMoveTimer = null;
-let climbMoveInFlight = false;
+let climbSyncInFlight = false;
+let climbSyncTimer = null;
 const heldClimbKeys = new Set();
+const pendingClimbTurns = [];
 
 setInterval(() => {
   state.now = Date.now();
@@ -46,6 +48,24 @@ async function api(path, payload) {
   return response.json();
 }
 
+function preserveLocalClimber(room, localPlayer) {
+  if (!room || !localPlayer || !state.playerId) return room;
+  const index = room.players?.findIndex((player) => player.id === state.playerId) ?? -1;
+  if (index < 0) return room;
+  const serverPlayer = room.players[index];
+  room.players[index] = {
+    ...serverPlayer,
+    score: localPlayer.score,
+    height: localPlayer.height,
+    direction: localPlayer.direction,
+    falls: localPlayer.falls,
+    lastClimbAt: localPlayer.lastClimbAt,
+    nextObstacle: localPlayer.nextObstacle,
+    lastResult: localPlayer.lastResult || serverPlayer.lastResult
+  };
+  return room;
+}
+
 async function loadDeck() {
   const response = await fetch("/api/deck");
   state.deck = await response.json();
@@ -61,7 +81,9 @@ function connectEvents(roomCode) {
   state.events = new EventSource(`/api/events?roomCode=${encodeURIComponent(roomCode)}`);
   state.events.addEventListener("room", (event) => {
     const previousStatus = state.room?.status;
-    state.room = JSON.parse(event.data);
+    const incomingRoom = JSON.parse(event.data);
+    const localClimber = state.view === "climb" && pendingClimbTurns.length ? currentPlayer() : null;
+    state.room = preserveLocalClimber(incomingRoom, localClimber);
     state.roomCode = state.room.code;
     localStorage.setItem("quizRoomCode", state.roomCode);
     if (state.room.status !== "answering") state.answeredChoiceId = "";
@@ -293,7 +315,7 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
       </div>
       <div class="climb-bank">
         <strong data-climb-points>${player.score || 0} pts</strong>
-        <span>${Math.floor((player.score || 0) / costs.forward)} forward moves ready</span>
+        <span data-climb-ready>${Math.floor((player.score || 0) / costs.forward)} smooth steps banked</span>
       </div>
       <div class="obstacle-card">
         <span>Next obstacle</span>
@@ -301,10 +323,10 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
         <em data-climb-next-description>${escapeHtml(next.description || "Clear the correct lane or fall to ground level.")}</em>
       </div>
       <div class="climb-buttons">
-        <button class="btn secondary" data-climb="left" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Left -${costs.side}</button>
-        <button class="btn gold" data-climb="straight" ${(player.score || 0) >= costs.forward ? "" : "disabled"}>Forward +${climbHeight} ft -${costs.forward}</button>
-        <button class="btn secondary" data-climb="back" ${(player.score || 0) >= costs.back ? "" : "disabled"}>Back -${costs.back}</button>
-        <button class="btn secondary" data-climb="right" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Right -${costs.side}</button>
+        <button class="btn secondary" data-climb="left" data-climb-button="left" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Left -${costs.side}</button>
+        <button class="btn gold" data-climb="straight" data-climb-button="straight" ${(player.score || 0) >= costs.forward ? "" : "disabled"}>Forward +${climbHeight} ft -${costs.forward}</button>
+        <button class="btn secondary" data-climb="back" data-climb-button="back" ${(player.score || 0) >= costs.back ? "" : "disabled"}>Back -${costs.back}</button>
+        <button class="btn secondary" data-climb="right" data-climb-button="right" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Right -${costs.side}</button>
       </div>
       ${showKeyboardHint ? `
         <div class="keyboard-hint">
@@ -684,7 +706,6 @@ function renderResults() {
         </div>
         <div class="actions">
           <button class="btn gold" data-action="player-next">${isLastQuestion ? "Complete My Run" : "Next Mission"}</button>
-          <button class="btn secondary" data-action="climb-screen">Climb Course</button>
         </div>
         ${state.role === "player" ? powerPanel() : ""}
         ${state.error ? `<p class="error">${escapeHtml(state.error)}</p>` : ""}
@@ -777,6 +798,7 @@ function refreshClimbHud() {
   const next = player.nextObstacle || {};
   const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 18, side: 9, back: 8 };
   const pointsNode = document.querySelector("[data-climb-points]");
+  const readyNode = document.querySelector("[data-climb-ready]");
   const nextNode = document.querySelector("[data-climb-next]");
   const nextDescriptionNode = document.querySelector("[data-climb-next-description]");
   const messageNode = document.querySelector("[data-climb-message]");
@@ -785,6 +807,7 @@ function refreshClimbHud() {
   const navNextNode = document.querySelector(".game-nav-stats div:nth-child(3) strong");
 
   if (pointsNode) pointsNode.textContent = `${player.score || 0} pts`;
+  if (readyNode) readyNode.textContent = `${Math.floor((player.score || 0) / costs.forward)} smooth steps banked`;
   if (nextNode) nextNode.textContent = `${next.title || "Next obstacle"} · Aim ${next.label || "Forward"}`;
   if (nextDescriptionNode) nextDescriptionNode.textContent = next.description || "Clear the correct lane or fall to ground level.";
   if (messageNode) {
@@ -795,21 +818,45 @@ function refreshClimbHud() {
   if (navPointNode) navPointNode.textContent = player.score || 0;
   if (navHeightNode) navHeightNode.textContent = `${Math.round(player.height || 0)} ft`;
   if (navNextNode) navNextNode.textContent = next.label || "Forward";
+  document.querySelectorAll("[data-climb-button]").forEach((button) => {
+    const turn = button.getAttribute("data-climb-button");
+    button.disabled = (player.score || 0) < movementCostForTurn(turn);
+  });
+}
+
+function movementCostForTurn(turn) {
+  const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 18, side: 9, back: 8 };
+  if (turn === "left" || turn === "right") return costs.side;
+  if (turn === "back") return costs.back;
+  return costs.forward;
+}
+
+function normalizedClimbTurn(turn) {
+  if (turn === "left" || turn === "right" || turn === "back") return turn;
+  return "forward";
+}
+
+function laneFromDirection(direction) {
+  if (Math.abs(direction || 0) < 0.55) return 0;
+  return Math.max(-1, Math.min(1, Math.sign(direction || 0)));
 }
 
 async function attemptClimb(turn) {
   if (state.role !== "player" || !state.room || state.room.status === "finished") return;
-  if (climbMoveInFlight) return;
+  if (state.view === "climb") {
+    queueClimbMove(turn, { flushSoon: true });
+    return;
+  }
+  if (climbSyncInFlight) return;
   const player = currentPlayer();
-  const costs = state.room?.climbCosts || { forward: state.room?.climbCost || 18, side: 9, back: 8 };
-  const moveCost = turn === "left" || turn === "right" ? costs.side : turn === "back" ? costs.back : costs.forward;
+  const moveCost = movementCostForTurn(turn);
   if (!player || player.score < moveCost) {
     state.error = `You need ${moveCost} points to move. Answer more questions to refill your point bank.`;
     if (state.view === "climb") refreshClimbHud();
     else render();
     return;
   }
-  climbMoveInFlight = true;
+  climbSyncInFlight = true;
   try {
     const reply = await api("/api/player/climb", {
       roomCode: state.roomCode,
@@ -825,7 +872,113 @@ async function attemptClimb(turn) {
       render();
     }
   } finally {
-    climbMoveInFlight = false;
+    climbSyncInFlight = false;
+  }
+}
+
+function applyLocalClimbMove(turn) {
+  const player = currentPlayer();
+  if (!player || state.role !== "player" || !state.room || state.room.status === "finished") return false;
+
+  const action = normalizedClimbTurn(turn);
+  const moveCost = movementCostForTurn(action);
+  if ((player.score || 0) < moveCost) {
+    state.error = `Movement energy empty. You need ${moveCost} points, so answer more questions before climbing again.`;
+    refreshClimbHud();
+    return false;
+  }
+
+  const climbHeight = state.room?.climbHeight || 2;
+  const obstacleHeight = state.room?.obstacleHeight || 24;
+  player.score = Math.max(0, (player.score || 0) - moveCost);
+  player.lastClimbAt = Date.now();
+  player.height ??= 0;
+  player.direction ??= 0;
+
+  if (action === "left" || action === "right") {
+    const laneStep = 0.28;
+    player.direction = Math.max(-2, Math.min(2, player.direction + (action === "left" ? -laneStep : laneStep)));
+  } else if (action === "back") {
+    player.height = Math.max(0, (player.height || 0) - climbHeight);
+  } else {
+    const oldHeight = player.height || 0;
+    const oldStep = Math.floor(oldHeight / obstacleHeight);
+    player.height = oldHeight + climbHeight;
+    const newStep = Math.floor(player.height / obstacleHeight);
+
+    if (newStep > oldStep) {
+      const expectedLane = typeof player.nextObstacle?.turnValue === "number" ? player.nextObstacle.turnValue : 0;
+      const currentLane = laneFromDirection(player.direction);
+      if (currentLane !== expectedLane) {
+        player.height = 0;
+        player.direction = 0;
+        player.falls = (player.falls || 0) + 1;
+      }
+    }
+  }
+
+  if (player.lastResult) {
+    player.lastResult = {
+      ...player.lastResult,
+      score: player.score,
+      height: player.height,
+      direction: player.direction,
+      falls: player.falls || 0
+    };
+  }
+
+  state.error = "";
+  return true;
+}
+
+function queueClimbMove(turn, options = {}) {
+  if (!applyLocalClimbMove(turn)) return;
+  pendingClimbTurns.push(normalizedClimbTurn(turn));
+  refreshClimbHud();
+  mountInteractiveScenes();
+
+  if (options.flushSoon || pendingClimbTurns.length >= 10) {
+    scheduleClimbSync(90);
+  } else {
+    scheduleClimbSync(260);
+  }
+}
+
+function scheduleClimbSync(delay = 260) {
+  if (climbSyncTimer) clearTimeout(climbSyncTimer);
+  climbSyncTimer = setTimeout(() => {
+    climbSyncTimer = null;
+    flushClimbMoves();
+  }, delay);
+}
+
+async function flushClimbMoves() {
+  if (climbSyncInFlight || !pendingClimbTurns.length || !state.roomCode || !state.playerId) return;
+  if (climbSyncTimer) {
+    clearTimeout(climbSyncTimer);
+    climbSyncTimer = null;
+  }
+
+  const turns = pendingClimbTurns.splice(0, 80);
+  climbSyncInFlight = true;
+  try {
+    const reply = await api("/api/player/climb-batch", {
+      roomCode: state.roomCode,
+      playerId: state.playerId,
+      turns
+    });
+    if (reply.ok && reply.room) {
+      const localClimber = pendingClimbTurns.length ? currentPlayer() : null;
+      state.room = preserveLocalClimber(reply.room, localClimber);
+      state.error = "";
+    } else {
+      state.error = reply.error || "Climb sync paused. Keep answering questions if you run out of points.";
+    }
+  } finally {
+    climbSyncInFlight = false;
+    refreshClimbHud();
+    mountInteractiveScenes();
+    if (pendingClimbTurns.length) scheduleClimbSync(80);
   }
 }
 
@@ -865,26 +1018,27 @@ function currentHeldClimbTurn() {
 
 function startClimbMovementLoop() {
   if (climbMoveTimer) return;
-  const tick = async () => {
+  const tick = () => {
     if (state.view !== "climb" || state.role !== "player" || !heldClimbKeys.size) {
       stopClimbMovementLoop();
       return;
     }
     const turn = currentHeldClimbTurn();
     const now = Date.now();
-    if (turn && now - lastClimbInputAt >= 130) {
+    if (turn && now - lastClimbInputAt >= 62) {
       lastClimbInputAt = now;
-      await attemptClimb(turn);
+      queueClimbMove(turn);
     }
   };
   tick();
-  climbMoveTimer = setInterval(tick, 55);
+  climbMoveTimer = setInterval(tick, 24);
 }
 
 function stopClimbMovementLoop() {
   if (!climbMoveTimer) return;
   clearInterval(climbMoveTimer);
   climbMoveTimer = null;
+  flushClimbMoves();
 }
 
 function render() {
@@ -1010,6 +1164,7 @@ app.addEventListener("click", async (event) => {
   }
 
   if (action === "quiz-screen") {
+    await flushClimbMoves();
     if (state.role === "player" && state.room?.status === "answering") {
       const reply = await api("/api/player/mode", {
         roomCode: state.roomCode,
@@ -1091,6 +1246,7 @@ window.addEventListener("keyup", (event) => {
 window.addEventListener("blur", () => {
   heldClimbKeys.clear();
   stopClimbMovementLoop();
+  flushClimbMoves();
 });
 
 app.addEventListener("input", async (event) => {

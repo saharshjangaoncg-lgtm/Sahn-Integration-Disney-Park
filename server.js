@@ -627,16 +627,26 @@ function usePlayerPower(room, playerId, power) {
   publish(room);
 }
 
-function useClimb(room, playerId, turn) {
-  if (room.status === "finished") throw new Error("The overall park timer ended.");
-  const player = room.players.get(playerId);
-  if (!player) throw new Error("Player session not recognized.");
+function normalizeClimbAction(turn) {
   const action = String(turn || "forward").toLowerCase();
+  if (action === "left") return "left";
+  if (action === "right") return "right";
+  if (action === "back" || action === "backward" || action === "down") return "back";
+  return "forward";
+}
+
+function climbCostForAction(action) {
+  if (action === "left" || action === "right") return CLIMB_SIDE_COST;
+  if (action === "back") return CLIMB_BACK_COST;
+  return CLIMB_FORWARD_COST;
+}
+
+function applyClimbMove(room, player, turn) {
+  const action = normalizeClimbAction(turn);
   const isLeft = action === "left";
   const isRight = action === "right";
-  const isBack = action === "back" || action === "backward" || action === "down";
-  const isForward = !isLeft && !isRight && !isBack;
-  const cost = isForward ? CLIMB_FORWARD_COST : isBack ? CLIMB_BACK_COST : CLIMB_SIDE_COST;
+  const isBack = action === "back";
+  const cost = climbCostForAction(action);
   if (player.score < cost) {
     throw new Error(`You need ${cost} points to move. Answer more questions to refill your point bank.`);
   }
@@ -648,10 +658,8 @@ function useClimb(room, playerId, turn) {
 
   if (isLeft || isRight) {
     player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -CLIMB_LANE_STEP : CLIMB_LANE_STEP)));
-    room.actionLog.push(`${player.name} shifted ${isLeft ? "left" : "right"} and spent ${cost} movement points.`);
   } else if (isBack) {
     player.height = Math.max(0, (player.height || 0) - CLIMB_STEP_HEIGHT);
-    room.actionLog.push(`${player.name} backed up safely and spent ${cost} movement points.`);
   } else {
     const oldHeight = player.height || 0;
     const oldStep = Math.floor(oldHeight / CLIMB_HEIGHT);
@@ -671,8 +679,6 @@ function useClimb(room, playerId, turn) {
     } else if (newStep > oldStep) {
       const turnLabel = expectedLane < 0 ? "left" : expectedLane > 0 ? "right" : "center";
       room.actionLog.push(`${player.name} cleared ${obstacle.title} in the ${turnLabel} lane and kept climbing.`);
-    } else {
-      room.actionLog.push(`${player.name} moved forward and spent ${cost} movement points.`);
     }
   }
 
@@ -683,8 +689,37 @@ function useClimb(room, playerId, turn) {
     player.falls = (player.falls || 0) + 1;
     room.actionLog.push(`${player.name} fell from ${Math.round(oldHeight)} ft and reset to ground level.`);
   }
+}
+
+function useClimb(room, playerId, turn) {
+  if (room.status === "finished") throw new Error("The overall park timer ended.");
+  const player = room.players.get(playerId);
+  if (!player) throw new Error("Player session not recognized.");
+  applyClimbMove(room, player, turn);
   syncLastResultScores(room);
   publish(room);
+}
+
+function useClimbBatch(room, playerId, turns) {
+  if (room.status === "finished") throw new Error("The overall park timer ended.");
+  const player = room.players.get(playerId);
+  if (!player) throw new Error("Player session not recognized.");
+  const safeTurns = Array.isArray(turns) ? turns.slice(0, 80) : [];
+  let applied = 0;
+
+  for (const turn of safeTurns) {
+    try {
+      applyClimbMove(room, player, turn);
+      applied += 1;
+    } catch (error) {
+      if (applied === 0) throw error;
+      break;
+    }
+  }
+
+  syncLastResultScores(room);
+  publish(room);
+  return applied;
 }
 
 function requireRoom(code) {
@@ -925,6 +960,13 @@ async function handleApi(req, res) {
       const room = requireRoom(body.roomCode);
       useClimb(room, body.playerId, body.turn);
       sendJson(res, 200, { ok: true, room: publicRoom(room) });
+      return;
+    }
+
+    if (route === "/api/player/climb-batch") {
+      const room = requireRoom(body.roomCode);
+      const applied = useClimbBatch(room, body.playerId, body.turns);
+      sendJson(res, 200, { ok: true, applied, room: publicRoom(room) });
       return;
     }
 
