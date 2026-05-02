@@ -185,6 +185,7 @@ function createScene(THREE, container) {
     const baseMaterial = material(theme.base);
     const railMaterial = material(theme.rail, { emissive: theme.rail, roughness: 0.5 });
     const accentMaterial = material(theme.accent, { emissive: theme.accent, roughness: 0.62 });
+    const shadowMaterial = material(0x111827, { roughness: 0.92 });
 
     for (let i = 0; i < platformCount; i += 1) {
       const point = routePoint(i, 0);
@@ -194,6 +195,15 @@ function createScene(THREE, container) {
       platform.position.set(point.x, point.y, point.z);
       platform.rotation.y = point.yaw + (i % 9 === 0 ? 0.18 : 0);
       tower.add(platform);
+
+      const underside = new THREE.Mesh(new THREE.BoxGeometry(width * 0.92, 0.2, depth * 0.92), shadowMaterial);
+      underside.position.set(point.x, point.y - 0.15, point.z);
+      underside.rotation.y = platform.rotation.y;
+      tower.add(underside);
+
+      if (i % 3 === 0) {
+        addLaneMarker(railMaterial, point, i);
+      }
 
       if (i > 0) {
         const prev = routePoint(i - 1, 0);
@@ -219,7 +229,7 @@ function createScene(THREE, container) {
       }
 
       if (i % 6 === 2) {
-        addObstacle(theme, accentMaterial, railMaterial, point, i);
+        addObstacle(theme, accentMaterial, railMaterial, shadowMaterial, point, i);
       }
     }
 
@@ -232,7 +242,25 @@ function createScene(THREE, container) {
     }
   }
 
-  function addObstacle(theme, accentMaterial, railMaterial, point, index) {
+  function addLaneMarker(railMaterial, point, index) {
+    const group = new THREE.Group();
+    group.position.set(point.x, point.y + 0.12, point.z);
+    group.rotation.y = point.yaw;
+    const left = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.055), railMaterial);
+    const right = left.clone();
+    left.position.set(-0.12, 0, -0.08);
+    right.position.set(0.12, 0, 0.08);
+    left.rotation.y = 0.45;
+    right.rotation.y = -0.45;
+    if (index % 2) {
+      left.scale.x = 0.72;
+      right.scale.x = 0.72;
+    }
+    group.add(left, right);
+    tower.add(group);
+  }
+
+  function addObstacle(theme, accentMaterial, railMaterial, shadowMaterial, point, index) {
     const group = new THREE.Group();
     group.position.set(point.x, point.y + 0.42, point.z);
     group.rotation.y = point.yaw;
@@ -244,25 +272,39 @@ function createScene(THREE, container) {
     if (type === "spires") {
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.74, 5), accentMaterial);
       const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.34, 8), railMaterial);
+      const towerA = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.52, 8), shadowMaterial);
+      const towerB = towerA.clone();
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.035), railMaterial);
       cone.position.y = 0.46;
       base.position.y = 0.08;
-      group.add(base, cone);
+      towerA.position.set(-0.34, 0.2, -0.12);
+      towerB.position.set(0.34, 0.2, -0.12);
+      flag.position.set(0.22, 0.82, 0);
+      group.add(base, cone, towerA, towerB, flag);
     } else if (type === "clubhouse") {
       const block = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), accentMaterial);
       const earA = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), railMaterial);
       const earB = earA.clone();
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.24, 0.035), shadowMaterial);
       earA.position.set(-0.22, 0.42, 0.02);
       earB.position.set(0.22, 0.42, 0.02);
-      group.add(block, earA, earB);
+      door.position.set(0, -0.08, 0.27);
+      group.add(block, earA, earB, door);
     } else if (type === "bows") {
       const knot = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), railMaterial);
       const left = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.42, 4), accentMaterial);
       const right = left.clone();
+      const ribbonA = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.045), railMaterial);
+      const ribbonB = ribbonA.clone();
       left.rotation.z = Math.PI / 2;
       right.rotation.z = -Math.PI / 2;
       left.position.x = -0.24;
       right.position.x = 0.24;
-      group.add(left, knot, right);
+      ribbonA.position.set(-0.1, -0.26, 0);
+      ribbonB.position.set(0.1, -0.26, 0);
+      ribbonA.rotation.z = 0.28;
+      ribbonB.rotation.z = -0.28;
+      group.add(left, knot, right, ribbonA, ribbonB);
     } else if (type === "dock") {
       for (let plank = 0; plank < 3; plank += 1) {
         const board = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.62, 0.18), plank % 2 ? railMaterial : accentMaterial);
@@ -270,17 +312,30 @@ function createScene(THREE, container) {
         board.rotation.z = (plank - 1) * 0.35;
         group.add(board);
       }
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.72, 10), railMaterial);
+      const sail = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.035), shadowMaterial);
+      mast.position.set(0.34, 0.2, -0.04);
+      sail.position.set(0.18, 0.42, -0.04);
+      sail.rotation.z = -0.25;
+      group.add(mast, sail);
     } else if (type === "trees") {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.74, 10), accentMaterial);
       const top = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.64, 10), railMaterial);
+      const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.5, 8), accentMaterial);
       top.position.y = 0.58;
-      group.add(trunk, top);
+      branch.position.set(0.22, 0.28, 0);
+      branch.rotation.z = 1.12;
+      group.add(trunk, top, branch);
     } else if (type === "inflatable") {
       const base = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.22, 0.34), accentMaterial);
       const arch = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.055, 8, 24, Math.PI), railMaterial);
+      const postA = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.45, 12), accentMaterial);
+      const postB = postA.clone();
       arch.position.y = 0.28;
       arch.rotation.z = Math.PI;
-      group.add(base, arch);
+      postA.position.set(-0.34, 0.2, 0);
+      postB.position.set(0.34, 0.2, 0);
+      group.add(base, arch, postA, postB);
     }
 
     tower.add(group);

@@ -28,7 +28,7 @@ setInterval(() => {
     node.textContent = formatSeconds(overallSecondsLeft());
   });
   document.querySelectorAll("[data-question-clock]").forEach((node) => {
-    node.textContent = state.room?.status === "answering" ? secondsLeft() : "--";
+    node.textContent = questionClockLabel();
   });
   if (state.view !== "climb" && (state.room?.status === "answering" || state.room?.gameEndsAt)) render();
 }, 1000);
@@ -56,10 +56,21 @@ function connectEvents(roomCode) {
   if (state.events) state.events.close();
   state.events = new EventSource(`/api/events?roomCode=${encodeURIComponent(roomCode)}`);
   state.events.addEventListener("room", (event) => {
+    const previousStatus = state.room?.status;
     state.room = JSON.parse(event.data);
     state.roomCode = state.room.code;
     localStorage.setItem("quizRoomCode", state.roomCode);
     if (state.room.status !== "answering") state.answeredChoiceId = "";
+    if (state.view === "climb" && previousStatus === state.room.status && state.room.status === "answering") {
+      document.querySelectorAll("[data-park-clock]").forEach((node) => {
+        node.textContent = formatSeconds(overallSecondsLeft());
+      });
+      document.querySelectorAll("[data-question-clock]").forEach((node) => {
+        node.textContent = questionClockLabel();
+      });
+      mountInteractiveScenes();
+      return;
+    }
     render();
   });
   state.events.onerror = () => {
@@ -253,7 +264,7 @@ function climbPanel(title = "3D Infinite Parkour Climb", options = {}) {
         <span class="badge">${escapeHtml(park.label || "Course")} selected</span>
         <h2>${escapeHtml(title)}</h2>
         <p class="muted">${escapeHtml(park.description || "")} Answer questions to earn point-bank currency, open the Climb Course, then spend ${climbCost} points to attempt the next ${climbHeight} ft obstacle. Pick the wrong lane and your height resets to 0.</p>
-        ${state.role === "player" && current ? climbControls(current, canClimb, climbCost, climbHeight) : ""}
+        ${state.role === "player" && current ? climbControls(current, canClimb, climbCost, climbHeight, { showKeyboardHint: !immersive }) : ""}
         <div class="height-board">${rows}</div>
       </div>
       <div id="climb-stage" class="climb-stage" aria-label="3D parkour tower"></div>
@@ -261,9 +272,10 @@ function climbPanel(title = "3D Infinite Parkour Climb", options = {}) {
   `;
 }
 
-function climbControls(player, canClimb, climbCost, climbHeight) {
+function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
   const next = player.nextObstacle || { title: "First Jump", label: "Forward", description: "Take the safe center lane." };
   const avatar = getAvatar(player.avatar);
+  const showKeyboardHint = options.showKeyboardHint !== false;
   return `
     <div class="climb-controls">
       <div class="assigned-climber" style="--avatar-color:${avatar.color}; --avatar-glow:${avatar.glow}">
@@ -287,11 +299,13 @@ function climbControls(player, canClimb, climbCost, climbHeight) {
         <button class="btn gold" data-climb="straight" ${canClimb ? "" : "disabled"}>Forward +${climbHeight} ft</button>
         <button class="btn secondary" data-climb="right" ${canClimb ? "" : "disabled"}>Right +${climbHeight} ft</button>
       </div>
-      <div class="keyboard-hint">
-        <kbd>A</kbd><kbd>←</kbd><span>left</span>
-        <kbd>W</kbd><kbd>↑</kbd><kbd>Space</kbd><span>jump forward</span>
-        <kbd>D</kbd><kbd>→</kbd><span>right</span>
-      </div>
+      ${showKeyboardHint ? `
+        <div class="keyboard-hint">
+          <kbd>A</kbd><kbd>←</kbd><span>left</span>
+          <kbd>W</kbd><kbd>↑</kbd><kbd>Space</kbd><span>jump forward</span>
+          <kbd>D</kbd><kbd>→</kbd><span>right</span>
+        </div>
+      ` : ""}
       ${canClimb ? "" : `<p class="muted">No climb available yet. Earn at least ${climbCost} points from questions or powers.</p>`}
     </div>
   `;
@@ -300,7 +314,7 @@ function climbControls(player, canClimb, climbCost, climbHeight) {
 function gameNav({ climbMode = false } = {}) {
   const player = currentPlayer();
   const next = player?.nextObstacle || { title: "First Jump", label: "Forward" };
-  const questionTime = state.room?.status === "answering" ? secondsLeft() : null;
+  const questionTime = state.room?.status === "answering" ? questionClockLabel() : "--";
   const statusLabel = state.room?.status === "answering"
     ? `Question ${state.room.currentQuestionIndex + 1}/${state.room.totalQuestions}`
     : state.room?.status === "results"
@@ -309,19 +323,32 @@ function gameNav({ climbMode = false } = {}) {
         ? "Lobby"
         : "Quest Complete";
 
+  const answered = state.room?.players?.filter((roomPlayer) => roomPlayer.answered).length || 0;
+  const playerCount = state.room?.players?.length || 0;
+  const chosenMinutes = Math.round((state.room?.gameDurationSeconds || state.gameDurationMinutes * 60) / 60);
+  const stats = state.role === "host"
+    ? `
+        <div><span>Players</span><strong>${playerCount}</strong></div>
+        <div><span>Answered</span><strong>${answered}/${playerCount}</strong></div>
+        <div><span>Park</span><strong data-park-clock>${formatSeconds(overallSecondsLeft())}</strong></div>
+        <div><span>Chosen</span><strong>${chosenMinutes} min</strong></div>
+        <div><span>Question</span><strong data-question-clock>${questionTime}</strong></div>
+      `
+    : `
+        <div><span>Points</span><strong>${player ? player.score || 0 : "-"}</strong></div>
+        <div><span>Height</span><strong>${player ? `${Math.round(player.height || 0)} ft` : "-"}</strong></div>
+        <div><span>Next</span><strong>${player ? next.label : "Watch"}</strong></div>
+        <div><span>Park</span><strong data-park-clock>${formatSeconds(overallSecondsLeft())}</strong></div>
+        <div><span>Question</span><strong data-question-clock>${questionTime}</strong></div>
+      `;
+
   return `
     <nav class="game-nav">
       <div class="game-nav-title">
         <span class="badge">${escapeHtml(statusLabel)}</span>
         <strong>${climbMode ? "Climb Course Mode" : "Quiz Mode"}</strong>
       </div>
-      <div class="game-nav-stats">
-        <div><span>Points</span><strong>${player ? player.score || 0 : "-"}</strong></div>
-        <div><span>Height</span><strong>${player ? `${Math.round(player.height || 0)} ft` : "-"}</strong></div>
-        <div><span>Next</span><strong>${player ? next.label : "Watch"}</strong></div>
-        <div><span>Park</span><strong data-park-clock>${formatSeconds(overallSecondsLeft())}</strong></div>
-        <div><span>Question</span><strong data-question-clock>${questionTime === null ? "--" : questionTime}</strong></div>
-      </div>
+      <div class="game-nav-stats">${stats}</div>
       <div class="game-nav-actions">
         ${climbMode ? `<button class="btn secondary" data-action="quiz-screen">Back to Quiz</button>` : `<button class="btn gold" data-action="climb-screen" ${state.role !== "player" ? "disabled" : ""}>Climb Course</button>`}
       </div>
@@ -339,7 +366,7 @@ function renderClimbMode() {
         <div>
           <span class="badge">Third-person parkour</span>
           <h2>${escapeHtml(park.title)} Run</h2>
-          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. Use A/D or arrow keys to choose lanes, press W/up/space to jump forward, and drag on the course to look around.</p>
+          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. Your question timer pauses here. Use A/D or arrow keys to choose lanes, press W/up/space to jump forward, and drag on the course to look around.</p>
         </div>
         <div class="control-card">
           <kbd>A</kbd><kbd>←</kbd><span>left</span>
@@ -496,16 +523,40 @@ function currentPlayer() {
   return state.room?.players.find((player) => player.id === state.playerId) || null;
 }
 
+function questionMillisecondsLeft() {
+  if (!state.room?.questionStartedAt || !state.room?.question || state.room.status !== "answering") return 0;
+  const player = currentPlayer();
+  if (state.role === "player" && player?.questionTimeLeftMs != null) {
+    return Math.max(0, Number(player.questionTimeLeftMs) || 0);
+  }
+  const liveTimers = (state.room.players || [])
+    .map((roomPlayer) => roomPlayer.questionTimeLeftMs)
+    .filter((timeLeft) => Number.isFinite(Number(timeLeft)))
+    .map(Number);
+  if (liveTimers.length) return Math.max(0, ...liveTimers);
+  const elapsed = state.now - state.room.questionStartedAt;
+  return Math.max(0, state.room.question.timeLimitSeconds * 1000 - elapsed);
+}
+
 function secondsLeft() {
-  if (!state.room?.questionStartedAt || !state.room?.question) return 0;
-  const elapsed = Math.floor((state.now - state.room.questionStartedAt) / 1000);
-  return Math.max(0, state.room.question.timeLimitSeconds - elapsed);
+  return Math.max(0, Math.ceil(questionMillisecondsLeft() / 1000));
+}
+
+function questionClockLabel() {
+  if (state.room?.status !== "answering") return "--";
+  const player = currentPlayer();
+  if (state.role === "player" && player?.answered) return "Done";
+  if (state.role === "player" && player?.questionPaused) return "Paused";
+  if (state.role === "player" && (player?.questionTimedOut || secondsLeft() <= 0)) return "Time";
+  return String(secondsLeft());
 }
 
 function renderQuestion() {
   const question = state.room.question;
+  const player = currentPlayer();
+  const timerClosed = state.role === "player" && (player?.questionTimedOut || secondsLeft() <= 0);
   const choices = question.choices.map((choice) => `
-    <button class="choice" style="background:${choice.color}" data-choice="${escapeHtml(choice.id)}" ${state.role === "host" || state.answeredChoiceId ? "disabled" : ""}>
+    <button class="choice" style="background:${choice.color}" data-choice="${escapeHtml(choice.id)}" ${state.role === "host" || state.answeredChoiceId || timerClosed ? "disabled" : ""}>
       <span>${escapeHtml(choice.park)}</span>
       <strong>${escapeHtml(choice.text)}</strong>
     </button>
@@ -524,13 +575,14 @@ function renderQuestion() {
           <div class="progress-rail"><span style="width:${Math.round(((state.room.currentQuestionIndex + 1) / state.room.totalQuestions) * 100)}%"></span></div>
         </div>
         <div class="timer-stack">
-          <div class="timer"><span>Question</span><strong>${secondsLeft()}</strong></div>
+          <div class="timer"><span>${state.role === "host" ? "Question max" : "Your question"}</span><strong data-question-clock>${questionClockLabel()}</strong></div>
           <div class="timer small"><span>Park</span><strong>${formatSeconds(overallSecondsLeft())}</strong></div>
         </div>
       </div>
       ${state.role === "host" ? hostAnswerMonitor() : ""}
       <div class="choices">${choices}</div>
       ${state.answeredChoiceId ? `<p class="notice">Ticket locked. Watch the host screen for the park reveal.</p>` : ""}
+      ${timerClosed && !state.answeredChoiceId ? `<p class="notice">Your question timer ended. Wait for the reveal, then keep climbing with any banked points.</p>` : ""}
     </section>
   `);
 }
@@ -658,6 +710,13 @@ function mountInteractiveScenes() {
 
 async function attemptClimb(turn) {
   if (state.role !== "player" || !state.room || state.room.status === "finished") return;
+  const player = currentPlayer();
+  const climbCost = state.room?.climbCost || 300;
+  if (!player || player.score < climbCost) {
+    state.error = `You need ${climbCost} points to climb. Answer more questions to refill your point bank.`;
+    render();
+    return;
+  }
   const reply = await api("/api/player/climb", {
     roomCode: state.roomCode,
     playerId: state.playerId,
@@ -761,15 +820,31 @@ app.addEventListener("click", async (event) => {
 
   if (action === "climb-screen") {
     if (state.role === "player" && state.room) {
+      if (state.room.status === "answering") {
+        const reply = await api("/api/player/mode", {
+          roomCode: state.roomCode,
+          playerId: state.playerId,
+          mode: "climb"
+        });
+        if (reply.ok && reply.room) state.room = reply.room;
+        state.error = reply.ok ? "" : reply.error;
+      }
       state.view = "climb";
-      state.error = "";
       render();
     }
   }
 
   if (action === "quiz-screen") {
+    if (state.role === "player" && state.room?.status === "answering") {
+      const reply = await api("/api/player/mode", {
+        roomCode: state.roomCode,
+        playerId: state.playerId,
+        mode: "quiz"
+      });
+      if (reply.ok && reply.room) state.room = reply.room;
+      state.error = reply.ok ? "" : reply.error;
+    }
     state.view = "room";
-    state.error = "";
     render();
   }
 

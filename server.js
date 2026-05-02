@@ -190,6 +190,92 @@ function playerQuestion(question, includeChoices) {
   };
 }
 
+function questionDurationMs(room) {
+  const question = lessonDeck.questions[room.currentQuestionIndex];
+  return Math.max(1000, Number(question?.timeLimitSeconds || 45) * 1000);
+}
+
+function resetPlayerQuestionTimer(room, player) {
+  player.questionTimeLeftMs = questionDurationMs(room);
+  player.questionTimerStartedAt = Date.now();
+  player.questionPaused = false;
+  player.questionTimedOut = false;
+}
+
+function visibleQuestionTimeLeft(room, player) {
+  if (room.status !== "answering") return null;
+  const stored = Number(player.questionTimeLeftMs ?? questionDurationMs(room));
+  if (room.answers.has(player.id) || player.questionPaused || !player.questionTimerStartedAt) {
+    return Math.max(0, Math.ceil(stored));
+  }
+  return Math.max(0, Math.ceil(stored - (Date.now() - player.questionTimerStartedAt)));
+}
+
+function markPlayerTimedOut(room, player, now = Date.now()) {
+  if (room.answers.has(player.id)) return;
+  player.questionTimeLeftMs = 0;
+  player.questionTimerStartedAt = now;
+  player.questionPaused = false;
+  player.questionTimedOut = true;
+  room.answers.set(player.id, {
+    choiceId: null,
+    answeredAt: now,
+    responseMs: questionDurationMs(room),
+    timedOut: true
+  });
+  room.actionLog.push(`${player.name}'s question timer ended before they answered.`);
+}
+
+function settleExpiredPlayerTimers(room) {
+  if (room.status !== "answering") return false;
+  const now = Date.now();
+  let changed = false;
+
+  for (const player of room.players.values()) {
+    if (room.answers.has(player.id)) continue;
+    if (player.questionTimeLeftMs == null) resetPlayerQuestionTimer(room, player);
+    if (player.questionPaused) continue;
+
+    const elapsed = Math.max(0, now - (player.questionTimerStartedAt || now));
+    player.questionTimeLeftMs = Math.max(0, Number(player.questionTimeLeftMs || 0) - elapsed);
+    player.questionTimerStartedAt = now;
+    changed = true;
+
+    if (player.questionTimeLeftMs <= 0) {
+      markPlayerTimedOut(room, player, now);
+    }
+  }
+
+  if (room.players.size > 0 && room.answers.size >= room.players.size) {
+    closeQuestion(room);
+    return true;
+  }
+
+  if (changed) publish(room);
+  return changed;
+}
+
+function pausePlayerQuestionTimer(room, player) {
+  if (room.status !== "answering" || room.answers.has(player.id)) return;
+  player.questionTimeLeftMs = visibleQuestionTimeLeft(room, player);
+  player.questionTimerStartedAt = Date.now();
+  player.questionPaused = true;
+  player.questionTimedOut = false;
+}
+
+function resumePlayerQuestionTimer(room, player) {
+  if (room.status !== "answering" || room.answers.has(player.id)) return;
+  const timeLeft = visibleQuestionTimeLeft(room, player);
+  if (timeLeft <= 0) {
+    markPlayerTimedOut(room, player);
+    return;
+  }
+  player.questionTimeLeftMs = timeLeft;
+  player.questionTimerStartedAt = Date.now();
+  player.questionPaused = false;
+  player.questionTimedOut = false;
+}
+
 function publicRoom(room) {
   const question = lessonDeck.questions[room.currentQuestionIndex] || null;
   const now = Date.now();
@@ -223,6 +309,9 @@ function publicRoom(room) {
       answered: Boolean(room.answers.get(player.id)),
       frozenNext: player.frozenQuestionIndex === room.currentQuestionIndex + 1 || player.frozenQuestionIndex === room.currentQuestionIndex,
       powerUsedThisRound: player.powerUsedQuestion === room.currentQuestionIndex,
+      questionTimeLeftMs: visibleQuestionTimeLeft(room, player),
+      questionPaused: Boolean(player.questionPaused),
+      questionTimedOut: Boolean(player.questionTimedOut),
       connected: true
     })),
     question: question ? playerQuestion(question, room.status === "answering") : null,
@@ -256,7 +345,7 @@ function computeResults(room) {
     const answer = room.answers.get(player.id);
     const selected = question.choices.find((choice) => choice.id === answer?.choiceId);
     const isCorrect = Boolean(selected?.correct);
-    const responseMs = answer ? Math.max(0, answer.answeredAt - room.questionStartedAt) : null;
+    const responseMs = answer ? Math.max(0, answer.responseMs ?? (answer.answeredAt - room.questionStartedAt)) : null;
     let pointsAwarded = 0;
     let speedBonus = 0;
     let streakBonus = 0;
@@ -323,13 +412,18 @@ function computeResults(room) {
 
 function closeQuestion(room) {
   if (room.status !== "answering") return;
+  if (room.timer) clearInterval(room.timer);
+  room.timer = null;
+  for (const player of room.players.values()) {
+    player.questionPaused = false;
+  }
   room.status = "results";
   room.lastResults = computeResults(room);
   publish(room);
 }
 
 function finishGame(room) {
-  if (room.timer) clearTimeout(room.timer);
+  if (room.timer) clearInterval(room.timer);
   if (room.gameTimer) clearTimeout(room.gameTimer);
   room.timer = null;
   room.gameTimer = null;
@@ -351,15 +445,19 @@ function startQuestion(room) {
     finishGame(room);
     return;
   }
-  if (room.timer) clearTimeout(room.timer);
+  if (room.timer) clearInterval(room.timer);
   room.status = "answering";
   room.answers = new Map();
   room.lastResults = null;
   room.questionStartedAt = Date.now();
-  const question = lessonDeck.questions[room.currentQuestionIndex];
-  const questionMs = question.timeLimitSeconds * 1000;
-  const remainingMs = room.gameEndsAt ? Math.max(1, room.gameEndsAt - Date.now()) : questionMs;
-  room.timer = setTimeout(() => closeQuestion(room), Math.min(questionMs, remainingMs));
+  for (const player of room.players.values()) resetPlayerQuestionTimer(room, player);
+  room.timer = setInterval(() => {
+    if (room.gameEndsAt && Date.now() >= room.gameEndsAt) {
+      finishGame(room);
+      return;
+    }
+    settleExpiredPlayerTimers(room);
+  }, 1000);
   publish(room);
 }
 
@@ -573,7 +671,7 @@ async function handleApi(req, res) {
         throw new Error("That avatar is already taken in this room. Pick another climber.");
       }
       const playerId = makeId();
-      room.players.set(playerId, {
+      const player = {
         id: playerId,
         name: sanitizeName(body.name),
         avatar,
@@ -585,7 +683,9 @@ async function handleApi(req, res) {
         streak: 0,
         frozenQuestionIndex: null,
         powerUsedQuestion: -1
-      });
+      };
+      if (room.status === "answering") resetPlayerQuestionTimer(room, player);
+      room.players.set(playerId, player);
       sendJson(res, 200, { ok: true, playerId, room: publicRoom(room), deck: lessonDeck });
       publish(room);
       return;
@@ -629,12 +729,39 @@ async function handleApi(req, res) {
       const player = room.players.get(body.playerId);
       if (!player) throw new Error("Player session not recognized.");
       if (room.answers.has(body.playerId)) throw new Error("You already answered this question.");
+      if (player.questionPaused) throw new Error("Return to the quiz screen before answering.");
+      settleExpiredPlayerTimers(room);
+      if (room.status !== "answering") throw new Error("Your question timer already ended.");
+      if (room.answers.has(body.playerId)) throw new Error("Your question timer already ended.");
       const question = lessonDeck.questions[room.currentQuestionIndex];
       if (!question.choices.some((choice) => choice.id === body.choiceId)) throw new Error("Choice not found.");
-      room.answers.set(body.playerId, { choiceId: body.choiceId, answeredAt: Date.now() });
+      const now = Date.now();
+      const timeLeft = visibleQuestionTimeLeft(room, player);
+      const responseMs = Math.max(0, questionDurationMs(room) - timeLeft);
+      player.questionTimeLeftMs = timeLeft;
+      player.questionTimerStartedAt = now;
+      room.answers.set(body.playerId, { choiceId: body.choiceId, answeredAt: now, responseMs });
       if (room.answers.size >= room.players.size && room.players.size > 0) closeQuestion(room);
       else publish(room);
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (route === "/api/player/mode") {
+      const room = requireRoom(body.roomCode);
+      const player = room.players.get(body.playerId);
+      if (!player) throw new Error("Player session not recognized.");
+      const mode = String(body.mode || "quiz").toLowerCase();
+      if (mode === "climb") {
+        pausePlayerQuestionTimer(room, player);
+      } else if (mode === "quiz") {
+        resumePlayerQuestionTimer(room, player);
+      } else {
+        throw new Error("Mode not recognized.");
+      }
+      if (room.status === "answering" && room.players.size > 0 && room.answers.size >= room.players.size) closeQuestion(room);
+      else publish(room);
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
       return;
     }
 
