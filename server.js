@@ -18,8 +18,10 @@ const CLIMB_FORWARD_COST = 18;
 const CLIMB_SIDE_COST = 9;
 const CLIMB_BACK_COST = 8;
 const CLIMB_STEP_HEIGHT = 2;
-const CLIMB_HEIGHT = 24;
+const CLIMB_HEIGHT = 72;
 const CLIMB_LANE_STEP = 0.28;
+const CLIMB_EDGE_LIMIT = 3.45;
+const QUESTION_TIMERS_ENABLED = false;
 const DEFAULT_GAME_DURATION_SECONDS = 20 * 60;
 const MIN_GAME_DURATION_SECONDS = 5 * 60;
 const MAX_GAME_DURATION_SECONDS = 60 * 60;
@@ -207,14 +209,15 @@ function startPlayerQuestion(room, player, questionIndex = 0) {
   player.answer = null;
   player.lastResult = null;
   player.questionStartedAt = Date.now();
-  player.questionTimeLeftMs = questionDurationMs(room, player);
-  player.questionTimerStartedAt = Date.now();
+  player.questionTimeLeftMs = QUESTION_TIMERS_ENABLED ? questionDurationMs(room, player) : null;
+  player.questionTimerStartedAt = QUESTION_TIMERS_ENABLED ? Date.now() : null;
   player.questionPaused = false;
   player.questionTimedOut = false;
   player.powerUsedQuestion = -1;
 }
 
 function visibleQuestionTimeLeft(room, player) {
+  if (!QUESTION_TIMERS_ENABLED) return null;
   if (room.status !== "answering" || player.phase !== "answering") return null;
   const stored = Number(player.questionTimeLeftMs ?? questionDurationMs(room, player));
   if (player.answer || player.questionPaused || !player.questionTimerStartedAt) {
@@ -241,6 +244,7 @@ function markPlayerTimedOut(room, player, now = Date.now()) {
 }
 
 function settleExpiredPlayerTimers(room) {
+  if (!QUESTION_TIMERS_ENABLED) return false;
   if (room.status !== "answering") return false;
   const now = Date.now();
   let changed = false;
@@ -265,6 +269,7 @@ function settleExpiredPlayerTimers(room) {
 }
 
 function pausePlayerQuestionTimer(room, player) {
+  if (!QUESTION_TIMERS_ENABLED) return;
   if (room.status !== "answering" || player.phase !== "answering" || player.answer) return;
   player.questionTimeLeftMs = visibleQuestionTimeLeft(room, player);
   player.questionTimerStartedAt = Date.now();
@@ -273,6 +278,7 @@ function pausePlayerQuestionTimer(room, player) {
 }
 
 function resumePlayerQuestionTimer(room, player) {
+  if (!QUESTION_TIMERS_ENABLED) return;
   if (room.status !== "answering" || player.phase !== "answering" || player.answer) return;
   const timeLeft = visibleQuestionTimeLeft(room, player);
   if (timeLeft <= 0) {
@@ -298,6 +304,9 @@ function publicPlayer(room, player) {
     direction: player.direction ?? 0,
     lastClimbAt: player.lastClimbAt || null,
     lastJumpAt: player.lastJumpAt || null,
+    lastFallAt: player.lastFallAt || null,
+    jumpOffset: player.jumpOffset || 0,
+    checkpointHeight: player.checkpointHeight || 0,
     nextObstacle: nextObstacleFor(room, player),
     falls: player.falls || 0,
     streak: player.streak,
@@ -333,6 +342,7 @@ function publicRoom(room) {
     gameStartedAt: room.gameStartedAt || null,
     gameEndsAt: room.gameEndsAt || null,
     gameSecondsLeft: room.gameEndsAt ? Math.max(0, Math.ceil((room.gameEndsAt - now) / 1000)) : null,
+    questionTimersEnabled: QUESTION_TIMERS_ENABLED,
     claimedAvatars: [...room.players.values()].map((player) => player.avatar),
     climbCost: CLIMB_FORWARD_COST,
     climbHeight: CLIMB_STEP_HEIGHT,
@@ -548,13 +558,15 @@ function startQuestion(room) {
   room.lastResults = null;
   room.questionStartedAt = Date.now();
   for (const player of room.players.values()) startPlayerQuestion(room, player, 0);
-  room.timer = setInterval(() => {
-    if (room.gameEndsAt && Date.now() >= room.gameEndsAt) {
-      finishGame(room);
-      return;
-    }
-    settleExpiredPlayerTimers(room);
-  }, 1000);
+  room.timer = QUESTION_TIMERS_ENABLED
+    ? setInterval(() => {
+        if (room.gameEndsAt && Date.now() >= room.gameEndsAt) {
+          finishGame(room);
+          return;
+        }
+        settleExpiredPlayerTimers(room);
+      }, 1000)
+    : null;
   publish(room);
 }
 
@@ -659,40 +671,35 @@ function applyClimbMove(room, player, turn) {
   player.height ??= 0;
   player.direction ??= 0;
   player.jumpArmedMoves ??= 0;
+  player.checkpointHeight ??= Math.floor((player.height || 0) / CLIMB_HEIGHT) * CLIMB_HEIGHT;
 
   if (isLeft || isRight) {
     player.direction = Math.max(-2, Math.min(2, (player.direction || 0) + (isLeft ? -CLIMB_LANE_STEP : CLIMB_LANE_STEP)));
   } else if (isBack) {
     player.height = Math.max(0, (player.height || 0) - CLIMB_STEP_HEIGHT);
+  } else if (isJump) {
+    player.lastJumpAt = Date.now();
+    player.jumpArmedMoves = 5;
+    player.coyotePending = false;
   } else {
-    if (isJump) {
-      player.lastJumpAt = Date.now();
-      player.jumpArmedMoves = 5;
-    }
-    const jumpReady = isJump || (player.jumpArmedMoves || 0) > 0;
-    if (!isJump && player.jumpArmedMoves > 0) {
+    const jumpReady = (player.jumpArmedMoves || 0) > 0;
+    if (player.jumpArmedMoves > 0) {
       player.jumpArmedMoves = Math.max(0, (player.jumpArmedMoves || 0) - 1);
     }
     const oldHeight = player.height || 0;
     const oldStep = Math.floor(oldHeight / CLIMB_HEIGHT);
     const obstacle = nextObstacleFor(room, player);
-    const expectedLane = obstacle.turnValue;
     player.height = oldHeight + CLIMB_STEP_HEIGHT;
     const newStep = Math.floor(player.height / CLIMB_HEIGHT);
-    const lane = player.direction || 0;
-    const currentLane = Math.abs(lane) < 0.55 ? 0 : Math.max(-1, Math.min(1, Math.sign(lane)));
-    const laneMatched = currentLane === expectedLane;
 
-    if (newStep > oldStep && (!laneMatched || !jumpReady)) {
-      player.height = 0;
-      player.direction = 0;
-      player.jumpArmedMoves = 0;
-      player.falls = (player.falls || 0) + 1;
-      room.actionLog.push(`${player.name} missed the timed jump on ${obstacle.title}, fell from ${Math.round(oldHeight)} ft, and reset to ground level.`);
+    if (newStep > oldStep && !jumpReady) {
+      player.height = Math.max(0, newStep * CLIMB_HEIGHT - 1);
+      player.coyotePending = true;
     } else if (newStep > oldStep) {
-      const turnLabel = expectedLane < 0 ? "left" : expectedLane > 0 ? "right" : "center";
-      room.actionLog.push(`${player.name} cleared ${obstacle.title} in the ${turnLabel} lane and kept climbing.`);
+      room.actionLog.push(`${player.name} cleared ${obstacle.title} and kept climbing.`);
       player.jumpArmedMoves = 0;
+      player.coyotePending = false;
+      player.checkpointHeight = newStep * CLIMB_HEIGHT;
     }
   }
 
@@ -700,6 +707,7 @@ function applyClimbMove(room, player, turn) {
     const oldHeight = player.height || 0;
     player.height = 0;
     player.direction = 0;
+    player.lastFallAt = Date.now();
     player.falls = (player.falls || 0) + 1;
     room.actionLog.push(`${player.name} fell from ${Math.round(oldHeight)} ft and reset to ground level.`);
   }
@@ -734,6 +742,42 @@ function useClimbBatch(room, playerId, turns) {
   syncLastResultScores(room);
   publish(room);
   return applied;
+}
+
+function clampNumber(value, min, max, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function useClimbState(room, playerId, snapshot = {}) {
+  if (room.status === "finished") throw new Error("The overall park timer ended.");
+  const player = room.players.get(playerId);
+  if (!player) throw new Error("Player session not recognized.");
+
+  const nextScore = Math.floor(clampNumber(snapshot.score, 0, 1_000_000, player.score || 0));
+  player.score = Math.min(player.score || 0, nextScore);
+  player.height = clampNumber(snapshot.height, 0, 100_000, player.height || 0);
+  player.direction = clampNumber(snapshot.direction, -3.7, 3.7, player.direction || 0);
+  player.falls = Math.max(player.falls || 0, Math.floor(clampNumber(snapshot.falls, 0, 10_000, player.falls || 0)));
+  player.checkpointHeight = clampNumber(snapshot.checkpointHeight, 0, player.height, player.checkpointHeight || 0);
+  player.jumpOffset = clampNumber(snapshot.jumpOffset, 0, 8, 0);
+
+  if (Math.abs(player.direction || 0) > CLIMB_EDGE_LIMIT) {
+    player.height = Math.max(0, player.checkpointHeight || 0);
+    player.direction = 0;
+    player.jumpOffset = 0;
+    player.lastFallAt = Date.now();
+    player.falls = (player.falls || 0) + 1;
+    room.actionLog.push(`${player.name} slipped off a platform edge and respawned at ${Math.round(player.height)} ft.`);
+  }
+
+  if (Number.isFinite(Number(snapshot.lastClimbAt))) player.lastClimbAt = Number(snapshot.lastClimbAt);
+  if (Number.isFinite(Number(snapshot.lastJumpAt))) player.lastJumpAt = Number(snapshot.lastJumpAt);
+  if (Number.isFinite(Number(snapshot.lastFallAt))) player.lastFallAt = Number(snapshot.lastFallAt);
+
+  syncLastResultScores(room);
+  publish(room);
 }
 
 function requireRoom(code) {
@@ -851,6 +895,9 @@ async function handleApi(req, res) {
         direction: 0,
         lastClimbAt: null,
         lastJumpAt: null,
+        lastFallAt: null,
+        jumpOffset: 0,
+        checkpointHeight: 0,
         jumpArmedMoves: 0,
         falls: 0,
         streak: 0,
@@ -906,14 +953,16 @@ async function handleApi(req, res) {
       if (!player) throw new Error("Player session not recognized.");
       if (player.phase !== "answering") throw new Error("Move to your next mission when you are ready.");
       if (player.answer) throw new Error("You already answered this question.");
-      if (player.questionPaused) throw new Error("Return to the quiz screen before answering.");
+      if (QUESTION_TIMERS_ENABLED && player.questionPaused) throw new Error("Return to the quiz screen before answering.");
       settleExpiredPlayerTimers(room);
       if (player.phase !== "answering" || player.answer) throw new Error("Your question timer already ended.");
       const question = lessonDeck.questions[player.currentQuestionIndex];
       if (!question.choices.some((choice) => choice.id === body.choiceId)) throw new Error("Choice not found.");
       const now = Date.now();
       const timeLeft = visibleQuestionTimeLeft(room, player);
-      const responseMs = Math.max(0, questionDurationMs(room, player) - timeLeft);
+      const responseMs = QUESTION_TIMERS_ENABLED
+        ? Math.max(0, questionDurationMs(room, player) - timeLeft)
+        : Math.max(0, now - (player.questionStartedAt || now));
       player.questionTimeLeftMs = timeLeft;
       player.questionTimerStartedAt = now;
       player.answer = { choiceId: body.choiceId, answeredAt: now, responseMs };
@@ -983,6 +1032,13 @@ async function handleApi(req, res) {
       const room = requireRoom(body.roomCode);
       const applied = useClimbBatch(room, body.playerId, body.turns);
       sendJson(res, 200, { ok: true, applied, room: publicRoom(room) });
+      return;
+    }
+
+    if (route === "/api/player/climb-state") {
+      const room = requireRoom(body.roomCode);
+      useClimbState(room, body.playerId, body.snapshot || {});
+      sendJson(res, 200, { ok: true, room: publicRoom(room) });
       return;
     }
 

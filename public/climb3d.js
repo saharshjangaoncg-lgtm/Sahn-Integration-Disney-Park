@@ -91,10 +91,12 @@ function normalizeClimbers(climbers) {
       avatar: player.avatar || avatarOptions[index % avatarOptions.length].id,
       score: Number(player.score || 0),
       height: Math.max(0, Number(player.height || 0)),
-      direction: Number(player.direction || 0),
+      direction: Math.max(-3.7, Math.min(3.7, Number(player.direction || 0))),
       falls: Number(player.falls || 0),
       lastClimbAt: Number(player.lastClimbAt || 0),
       lastJumpAt: Number(player.lastJumpAt || 0),
+      lastFallAt: Number(player.lastFallAt || 0),
+      jumpOffset: Math.max(0, Number(player.jumpOffset || 0)),
       answered: Boolean(player.answered)
     }))
     .sort((a, b) => b.height - a.height || b.score - a.score)
@@ -129,7 +131,7 @@ function createScene(THREE, container) {
 
   const loopFeet = 900;
   const platformCount = 72;
-  const laneWidth = 0.52;
+  const laneWidth = 0.24;
   const levelGap = 0.52;
   let activeCourse = "";
   let cameraTarget = new THREE.Vector3(0, 1, 0);
@@ -216,8 +218,8 @@ function createScene(THREE, container) {
 
     for (let i = 0; i < platformCount; i += 1) {
       const point = routePoint(i, 0);
-      const width = theme.obstacle === "trees" ? 1.28 : theme.obstacle === "dock" ? 1.72 : 1.92;
-      const depth = theme.obstacle === "clubhouse" ? 0.94 : 0.72;
+      const width = theme.obstacle === "trees" ? 1.78 : theme.obstacle === "dock" ? 2.18 : 2.34;
+      const depth = theme.obstacle === "clubhouse" ? 1.18 : 1.04;
       const platformGeometry = roundedPadGeometry(width, 0.13, depth, Math.min(0.28, depth * 0.42));
       const platform = new THREE.Mesh(platformGeometry, i % 5 === 0 ? railMaterial : baseMaterial);
       platform.position.set(point.x, point.y, point.z);
@@ -233,15 +235,19 @@ function createScene(THREE, container) {
         addLaneMarker(railMaterial, point, i);
       }
 
-      if (i > 0) {
+      if (i > 0 && i % 3 !== 0) {
         const prev = routePoint(i - 1, 0);
         const dx = point.x - prev.x;
         const dz = point.z - prev.z;
         const distance = Math.hypot(dx, dz);
-        const bridge = new THREE.Mesh(roundedPadGeometry(Math.max(0.45, distance), 0.055, 0.18, 0.08), railMaterial);
+        const bridge = new THREE.Mesh(roundedPadGeometry(Math.max(0.45, distance), 0.06, 0.24, 0.09), railMaterial);
         bridge.position.set((point.x + prev.x) / 2, point.y - 0.08, (point.z + prev.z) / 2);
         bridge.rotation.y = Math.atan2(dz, dx);
         tower.add(bridge);
+      }
+
+      if (i % 3 === 2) {
+        addJumpPad(theme, accentMaterial, railMaterial, point, i);
       }
 
       if (i % 5 === 0) {
@@ -288,9 +294,35 @@ function createScene(THREE, container) {
     tower.add(group);
   }
 
+  function addJumpPad(theme, accentMaterial, railMaterial, point, index) {
+    const group = new THREE.Group();
+    group.position.set(point.x, point.y + 0.16, point.z);
+    group.rotation.y = point.yaw;
+    const glow = new THREE.Mesh(
+      roundedPadGeometry(1.08, 0.035, 0.22, 0.09),
+      material(theme.rail, { emissive: theme.rail, roughness: 0.32 })
+    );
+    const arrowA = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.34, 3), accentMaterial);
+    const arrowB = arrowA.clone();
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(1.22, 0.045, 0.065), railMaterial);
+    glow.position.set(0.22, 0.01, 0);
+    edge.position.set(0.54, 0.07, 0);
+    arrowA.position.set(0.08, 0.08, -0.16);
+    arrowB.position.set(0.08, 0.08, 0.16);
+    arrowA.rotation.z = -Math.PI / 2;
+    arrowB.rotation.z = -Math.PI / 2;
+    if (index % 2 === 0) {
+      arrowA.scale.setScalar(0.85);
+      arrowB.scale.setScalar(0.85);
+    }
+    group.add(glow, edge, arrowA, arrowB);
+    tower.add(group);
+  }
+
   function addObstacle(theme, accentMaterial, railMaterial, shadowMaterial, point, index) {
     const group = new THREE.Group();
-    group.position.set(point.x, point.y + 0.42, point.z);
+    const sideDecor = index % 4 < 2 ? 0.62 : -0.62;
+    group.position.set(point.x, point.y + 0.42, point.z + sideDecor);
     group.rotation.y = point.yaw;
 
     const type = theme.obstacle === "mixed"
@@ -403,6 +435,8 @@ function createScene(THREE, container) {
   container.append(labelLayer);
 
   const playerMeshes = new Map();
+  let lastLabelHtml = "";
+  let lastLabelUpdate = 0;
 
   function size() {
     const rect = canvasHost.getBoundingClientRect();
@@ -526,7 +560,7 @@ function createScene(THREE, container) {
     const step = Math.min(platformCount - 2, Math.max(0, Math.floor(progress)));
     const nextStep = Math.min(platformCount - 1, step + 1);
     const mix = Math.max(0, Math.min(1, progress - step));
-    const lane = Math.max(-2, Math.min(2, player.direction || 0));
+    const lane = Math.max(-3.7, Math.min(3.7, player.direction || 0));
     const from = routePoint(step, lane);
     const to = routePoint(nextStep, lane);
     return {
@@ -560,8 +594,8 @@ function createScene(THREE, container) {
       const leaderHeight = Math.max(120, ...climbers.map((player) => player.height));
       const leaderStep = Math.floor((leaderHeight % loopFeet) / 24);
       const leaderPoint = routePoint(Math.min(platformCount - 1, leaderStep), 0);
-      cameraTarget.set(leaderPoint.x, leaderPoint.y + 1.4, leaderPoint.z);
-      cameraBasePosition.set(leaderPoint.x + 5.8, leaderPoint.y + 5.4, leaderPoint.z + 8.2);
+      cameraTarget.lerp(new THREE.Vector3(leaderPoint.x, leaderPoint.y + 1.4, leaderPoint.z), 0.18);
+      cameraBasePosition.lerp(new THREE.Vector3(leaderPoint.x + 5.8, leaderPoint.y + 5.4, leaderPoint.z + 8.2), 0.18);
     }
 
     climbers.forEach((player, index) => {
@@ -583,6 +617,9 @@ function createScene(THREE, container) {
       mesh.userData.falling = player.height === 0 && (player.falls || 0) > 0;
       mesh.userData.lastClimbAt = player.lastClimbAt;
       mesh.userData.lastJumpAt = player.lastJumpAt;
+      mesh.userData.lastFallAt = player.lastFallAt;
+      mesh.userData.jumpOffset = player.jumpOffset;
+      mesh.userData.usePhysicsLift = player.id === focusPlayerId || player.jumpOffset > 0;
     });
 
     for (const [id, mesh] of playerMeshes) {
@@ -592,7 +629,7 @@ function createScene(THREE, container) {
       }
     }
 
-    labelLayer.innerHTML = climbers.map((player, index) => {
+    const nextLabelHtml = climbers.map((player, index) => {
       const avatar = getAvatar(player.avatar);
       const lap = Math.floor(player.height / loopFeet) + 1;
       return `
@@ -602,35 +639,56 @@ function createScene(THREE, container) {
         </div>
       `;
     }).join("");
+    const now = performance.now();
+    if (nextLabelHtml !== lastLabelHtml && (now - lastLabelUpdate > 180 || !lastLabelHtml)) {
+      labelLayer.innerHTML = nextLabelHtml;
+      lastLabelHtml = nextLabelHtml;
+      lastLabelUpdate = now;
+    }
   }
 
   let frame = 0;
-  function animate() {
+  let lastRenderTime = 0;
+  function animate(time = 0) {
     if (!document.body.contains(container)) {
       renderer.setAnimationLoop(null);
       renderer.dispose();
       return;
     }
-    frame += 0.01;
-    tower.rotation.y = Math.sin(frame * 0.22) * 0.035;
-    players.rotation.y = tower.rotation.y;
+    const dt = lastRenderTime ? Math.min(0.05, Math.max(0.001, (time - lastRenderTime) / 1000)) : 1 / 60;
+    lastRenderTime = time;
+    const positionDamp = 1 - Math.exp(-10.5 * dt);
+    const yDamp = 1 - Math.exp(-13 * dt);
+    const yawDamp = 1 - Math.exp(-12 * dt);
+    const cameraDamp = 1 - Math.exp(-7.4 * dt);
+    frame += dt;
+    tower.rotation.y += (0 - tower.rotation.y) * (1 - Math.exp(-8 * dt));
+    players.rotation.y += (0 - players.rotation.y) * (1 - Math.exp(-8 * dt));
     players.children.forEach((mesh, index) => {
       const now = Date.now();
       const moveAge = mesh.userData.lastClimbAt ? now - mesh.userData.lastClimbAt : 9999;
       const jumpAge = mesh.userData.lastJumpAt ? now - mesh.userData.lastJumpAt : 9999;
+      const fallAge = mesh.userData.lastFallAt ? now - mesh.userData.lastFallAt : 9999;
       const runBlend = Math.max(0, Math.min(1, 1 - moveAge / 240));
-      const jumpLift = jumpAge < 820 ? Math.sin((jumpAge / 820) * Math.PI) * 0.86 : 0;
+      const jumpSeconds = jumpAge / 1000;
+      const physicsLift = Number(mesh.userData.jumpOffset || 0);
+      const jumpLift = mesh.userData.usePhysicsLift ? physicsLift : jumpAge < 940 ? Math.max(0, 4.8 * jumpSeconds - 0.5 * 10.2 * jumpSeconds * jumpSeconds) : 0;
+      const landingAge = jumpAge - 940;
+      const landingBlend = landingAge >= 0 && landingAge < 200 ? 1 - landingAge / 200 : 0;
+      const squashY = 1 - landingBlend * 0.3;
+      const squashX = 1 + landingBlend * 0.13;
+      const fallDrop = fallAge < 1000 ? -Math.min(5.4, (fallAge / 1000) * 6.2) : 0;
       const stride = Math.sin(now * 0.018 + index);
       const bob = runBlend * Math.abs(stride) * 0.055;
       const target = mesh.userData.targetPosition;
       if (target) {
-        mesh.position.x += (target.x - mesh.position.x) * 0.13;
-        mesh.position.z += (target.z - mesh.position.z) * 0.13;
-        mesh.position.y += (target.y + bob + jumpLift - mesh.position.y) * 0.16;
+        mesh.position.x += (target.x - mesh.position.x) * positionDamp;
+        mesh.position.z += (target.z - mesh.position.z) * positionDamp;
+        mesh.position.y += (target.y + bob + jumpLift + fallDrop - mesh.position.y) * yDamp;
       }
       if (typeof mesh.userData.targetYaw === "number") {
         const yawDelta = Math.atan2(Math.sin(mesh.userData.targetYaw - mesh.rotation.y), Math.cos(mesh.userData.targetYaw - mesh.rotation.y));
-        mesh.rotation.y += yawDelta * 0.14;
+        mesh.rotation.y += yawDelta * yawDamp;
       }
       const parts = mesh.userData.parts || {};
       if (parts.leftLeg) {
@@ -640,12 +698,14 @@ function createScene(THREE, container) {
         parts.rightArm.rotation.x = stride * 0.42 * runBlend;
         parts.body.rotation.x = -0.08 * runBlend - jumpLift * 0.08;
         parts.head.position.y = 0.47 + bob * 0.45;
-        parts.glow.rotation.z += 0.02 + runBlend * 0.035;
+        parts.glow.rotation.z += (1.2 + runBlend * 2.2) * dt;
       }
-      mesh.rotation.z = mesh.userData.falling ? Math.sin(frame * 8 + index) * 0.24 : 0;
-      mesh.scale.setScalar(mesh.userData.answered ? 1.12 : 1);
+      mesh.rotation.z = fallAge < 1000 ? Math.sin(frame * 10 + index) * 0.28 : 0;
+      const baseScale = mesh.userData.answered ? 1.12 : 1;
+      const flashScale = fallAge < 1000 && Math.floor(fallAge / 90) % 2 === 0 ? 1.08 : 1;
+      mesh.scale.set(baseScale * squashX * flashScale, baseScale * squashY, baseScale * squashX * flashScale);
     });
-    camera.position.lerp(cameraBasePosition, 0.08);
+    camera.position.lerp(cameraBasePosition, cameraDamp);
     camera.lookAt(cameraTarget);
     renderer.render(scene, camera);
   }

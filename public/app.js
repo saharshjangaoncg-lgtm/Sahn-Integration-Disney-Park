@@ -21,23 +21,41 @@ const state = {
   events: null,
   now: Date.now()
 };
-let lastClimbInputAt = 0;
-let climbMoveTimer = null;
+let climbFrameId = 0;
 let climbSyncInFlight = false;
 let climbSyncTimer = null;
+let climbStateSyncInFlight = false;
+let climbStateSyncTimer = null;
+let climbStateDirty = false;
 const heldClimbKeys = new Set();
 const pendingClimbTurns = [];
+const climbMotion = {
+  velocity: 0,
+  steerVelocity: 0,
+  verticalVelocity: 0,
+  jumpOffset: 0,
+  grounded: true,
+  lastGroundedAt: Date.now(),
+  pointAccumulator: 0,
+  lastTime: 0,
+  lastHudAt: 0,
+  lastSceneAt: 0,
+  jumpBufferUntil: 0
+};
 
 setInterval(() => {
   state.now = Date.now();
+  refreshClockNodes();
+}, 1000);
+
+function refreshClockNodes() {
   document.querySelectorAll("[data-park-clock]").forEach((node) => {
     node.textContent = formatSeconds(overallSecondsLeft());
   });
   document.querySelectorAll("[data-question-clock]").forEach((node) => {
     node.textContent = questionClockLabel();
   });
-  if (state.view !== "climb" && (state.room?.status === "answering" || state.room?.gameEndsAt)) render();
-}, 1000);
+}
 
 async function api(path, payload) {
   const response = await fetch(path, {
@@ -61,8 +79,14 @@ function preserveLocalClimber(room, localPlayer) {
     falls: localPlayer.falls,
     lastClimbAt: localPlayer.lastClimbAt,
     lastJumpAt: localPlayer.lastJumpAt,
+    lastFallAt: localPlayer.lastFallAt,
+    jumpOffset: localPlayer.jumpOffset,
     jumpArmedMoves: localPlayer.jumpArmedMoves,
-    nextObstacle: localPlayer.nextObstacle,
+    checkpointHeight: localPlayer.checkpointHeight,
+    coyoteUntil: localPlayer.coyoteUntil,
+    pendingCoyoteStep: localPlayer.pendingCoyoteStep,
+    pendingCoyoteObstacle: localPlayer.pendingCoyoteObstacle,
+    nextObstacle: serverPlayer.nextObstacle || localPlayer.nextObstacle,
     lastResult: localPlayer.lastResult || serverPlayer.lastResult
   };
   return room;
@@ -78,24 +102,74 @@ async function getJson(path) {
   return response.json();
 }
 
+function roomRenderSignature(room) {
+  if (!room) return "";
+  return JSON.stringify({
+    status: room.status,
+    currentQuestionIndex: room.currentQuestionIndex,
+    players: (room.players || []).map((player) => [
+      player.id,
+      player.score,
+      Math.round(Number(player.height || 0) * 10) / 10,
+      Math.round(Number(player.direction || 0) * 10) / 10,
+      player.phase,
+      player.currentQuestionIndex,
+      player.answered,
+      player.falls,
+      player.streak,
+      player.lastFallAt,
+      player.lastJumpAt,
+      player.questionTimedOut
+    ]),
+    actionLog: room.actionLog || []
+  });
+}
+
+function roomPaceSignature(room) {
+  if (!room) return "";
+  return JSON.stringify({
+    status: room.status,
+    currentQuestionIndex: room.currentQuestionIndex,
+    players: (room.players || []).map((player) => [
+      player.id,
+      player.phase,
+      player.currentQuestionIndex,
+      player.answered,
+      player.questionTimedOut
+    ])
+  });
+}
+
 function connectEvents(roomCode) {
   if (state.events) state.events.close();
   state.events = new EventSource(`/api/events?roomCode=${encodeURIComponent(roomCode)}`);
   state.events.addEventListener("room", (event) => {
     const previousStatus = state.room?.status;
+    const previousSignature = roomRenderSignature(state.room);
+    const previousPaceSignature = roomPaceSignature(state.room);
     const incomingRoom = JSON.parse(event.data);
-    const localClimber = state.view === "climb" && pendingClimbTurns.length ? currentPlayer() : null;
+    const localClimber = state.view === "climb" && state.role === "player" ? currentPlayer() : null;
     state.room = preserveLocalClimber(incomingRoom, localClimber);
     state.roomCode = state.room.code;
     localStorage.setItem("quizRoomCode", state.roomCode);
     if (state.room.status !== "answering") state.answeredChoiceId = "";
+    const nextSignature = roomRenderSignature(state.room);
+    const nextPaceSignature = roomPaceSignature(state.room);
+    if (state.role === "host" && previousStatus === state.room.status && previousPaceSignature === nextPaceSignature) {
+      refreshClockNodes();
+      mountInteractiveScenes();
+      return;
+    }
+    if (previousStatus === state.room.status && previousSignature === nextSignature) {
+      refreshClockNodes();
+      if (state.view === "climb") {
+        refreshClimbHud();
+        mountInteractiveScenes();
+      }
+      return;
+    }
     if (state.view === "climb" && previousStatus === state.room.status && state.room.status === "answering") {
-      document.querySelectorAll("[data-park-clock]").forEach((node) => {
-        node.textContent = formatSeconds(overallSecondsLeft());
-      });
-      document.querySelectorAll("[data-question-clock]").forEach((node) => {
-        node.textContent = questionClockLabel();
-      });
+      refreshClockNodes();
       refreshClimbHud();
       mountInteractiveScenes();
       return;
@@ -292,7 +366,7 @@ function climbPanel(title = "3D Infinite Parkour Climb", options = {}) {
       <div class="climb-copy">
         <span class="badge">${escapeHtml(park.label || "Course")} selected</span>
         <h2>${escapeHtml(title)}</h2>
-        <p class="muted">${escapeHtml(park.description || "")} Answer questions to fill your point bank, open the Climb Course, then run smoothly, steer lanes, and time Space jumps at each obstacle gate or fall back to 0 ft.</p>
+        <p class="muted">${escapeHtml(park.description || "")} Answer questions to fill your point bank, open the Climb Course, then run smoothly across real platform gaps. Space clears glowing jump pads; missing a jump stops you at the edge instead of randomly teleporting you.</p>
         ${state.role === "player" && current ? climbControls(current, canClimb, climbCost, climbHeight, { showKeyboardHint: !immersive }) : ""}
         <div class="height-board">${rows}</div>
       </div>
@@ -320,9 +394,9 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
         <span data-climb-ready>${Math.floor((player.score || 0) / costs.forward)} smooth steps banked</span>
       </div>
       <div class="obstacle-card">
-        <span>Next obstacle</span>
-        <strong data-climb-next>${escapeHtml(next.title)} · Aim ${escapeHtml(next.label)}</strong>
-        <em data-climb-next-description>${escapeHtml(next.description || "Clear the correct lane or fall to ground level.")}</em>
+        <span>Next platform gap</span>
+        <strong data-climb-next>${escapeHtml(next.title)} · Jump gap at ${Math.round(nextGapHeight(player.height || 0))} ft</strong>
+        <em data-climb-next-description>${escapeHtml(next.description || "Run to the glowing edge and press Space to clear the platform gap.")}</em>
       </div>
       <div class="climb-buttons">
         <button class="btn secondary" data-climb="left" data-climb-button="left" ${(player.score || 0) >= costs.side ? "" : "disabled"}>Left -${costs.side}</button>
@@ -340,7 +414,7 @@ function climbControls(player, canClimb, climbCost, climbHeight, options = {}) {
           <kbd>D</kbd><kbd>→</kbd><span>right</span>
         </div>
       ` : ""}
-      <p class="muted" data-climb-message>${canClimb ? "Hold W to run, steer with A/D, and press Space right before obstacle gates." : `No movement energy yet. Earn at least ${climbCost} points from questions or powers.`}</p>
+      <p class="muted" data-climb-message>${canClimb ? "Hold W to run, steer with A/D, and press Space to clear glowing platform gaps." : `No movement energy yet. Earn at least ${climbCost} points from questions or powers.`}</p>
     </div>
   `;
 }
@@ -405,7 +479,7 @@ function renderClimbMode() {
         <div>
           <span class="badge">Third-person parkour</span>
           <h2>${escapeHtml(park.title)} Run</h2>
-          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. Your question timer pauses here. Hold W to run, press Space for timed jumps, use S to back up, A/D to steer lanes, and drag on the course to look around.</p>
+          <p class="muted">Control ${escapeHtml(player ? getAvatar(player.avatar).name : "your avatar")} on the 3D course. The quiz is student-paced, so no question countdown fights the movement. Hold W to run, press Space to clear glowing platform gaps, use S to back up, A/D to steer, and drag on the course to look around.</p>
         </div>
         <div class="control-card">
           <kbd>A</kbd><kbd>←</kbd><span>left</span>
@@ -506,7 +580,7 @@ function timerSetup() {
       <div>
         <span class="badge">Overall Timer</span>
         <h3>${state.gameDurationMinutes} minute park clock</h3>
-        <p class="muted">This is the whole game timer. Each question still has its own internal countdown.</p>
+        <p class="muted">This is only the whole game clock. Questions are practice-paced now so the 3D movement stays smooth.</p>
       </div>
       <div class="timer-options">
         ${options.map((minutes) => `
@@ -572,6 +646,7 @@ function currentQuestion() {
 
 function questionMillisecondsLeft() {
   if (state.room?.status !== "answering") return 0;
+  if (state.room?.questionTimersEnabled === false) return null;
   const player = currentPlayer();
   if (state.role === "player" && player?.questionTimeLeftMs != null) {
     return Math.max(0, Number(player.questionTimeLeftMs) || 0);
@@ -589,11 +664,14 @@ function questionMillisecondsLeft() {
 }
 
 function secondsLeft() {
-  return Math.max(0, Math.ceil(questionMillisecondsLeft() / 1000));
+  const milliseconds = questionMillisecondsLeft();
+  if (milliseconds == null) return null;
+  return Math.max(0, Math.ceil(milliseconds / 1000));
 }
 
 function questionClockLabel() {
   if (state.room?.status !== "answering") return "--";
+  if (state.room?.questionTimersEnabled === false) return "Practice";
   const player = currentPlayer();
   if (state.role === "player" && player?.phase === "results") return "Done";
   if (state.role === "player" && player?.phase === "finished") return "--";
@@ -606,7 +684,8 @@ function renderQuestion() {
   const question = currentQuestion();
   const player = currentPlayer();
   if (!question || !player) return renderFinished();
-  const timerClosed = player?.questionTimedOut || secondsLeft() <= 0;
+  const timersEnabled = state.room?.questionTimersEnabled !== false;
+  const timerClosed = timersEnabled && (player?.questionTimedOut || secondsLeft() <= 0);
   const choices = question.choices.map((choice) => `
     <button class="choice" style="background:${choice.color}" data-choice="${escapeHtml(choice.id)}" ${state.answeredChoiceId || timerClosed || player.phase !== "answering" ? "disabled" : ""}>
       <span>${escapeHtml(choice.park)}</span>
@@ -627,8 +706,8 @@ function renderQuestion() {
           <div class="progress-rail"><span style="width:${Math.round(((state.room.currentQuestionIndex + 1) / state.room.totalQuestions) * 100)}%"></span></div>
         </div>
         <div class="timer-stack">
-          <div class="timer"><span>Your question</span><strong data-question-clock>${questionClockLabel()}</strong></div>
-          <div class="timer small"><span>Park</span><strong>${formatSeconds(overallSecondsLeft())}</strong></div>
+          ${timersEnabled ? `<div class="timer"><span>Your question</span><strong data-question-clock>${questionClockLabel()}</strong></div>` : `<div class="timer"><span>Question pace</span><strong>Practice</strong></div>`}
+          <div class="timer small"><span>Park</span><strong data-park-clock>${formatSeconds(overallSecondsLeft())}</strong></div>
         </div>
       </div>
       <div class="choices">${choices}</div>
@@ -813,16 +892,16 @@ function refreshClimbHud() {
 
   if (pointsNode) pointsNode.textContent = `${player.score || 0} pts`;
   if (readyNode) readyNode.textContent = `${Math.floor((player.score || 0) / costs.forward)} smooth steps banked`;
-  if (nextNode) nextNode.textContent = `${next.title || "Next obstacle"} · Aim ${next.label || "Forward"}`;
-  if (nextDescriptionNode) nextDescriptionNode.textContent = next.description || "Clear the correct lane or fall to ground level.";
+  if (nextNode) nextNode.textContent = `${next.title || "Next platform"} · Jump gap at ${Math.round(nextGapHeight(player.height || 0))} ft`;
+  if (nextDescriptionNode) nextDescriptionNode.textContent = next.description || "Run to the glowing edge and press Space to clear the platform gap.";
   if (messageNode) {
     messageNode.textContent = state.error || ((player.score || 0) >= costs.back
-      ? "Hold W to run, steer with A/D, and press Space right before obstacle gates."
+      ? "Hold W to run, steer with A/D, and press Space to clear glowing platform gaps."
       : `Movement energy empty. Answer more questions to refill your point bank.`);
   }
   if (navPointNode) navPointNode.textContent = player.score || 0;
   if (navHeightNode) navHeightNode.textContent = `${Math.round(player.height || 0)} ft`;
-  if (navNextNode) navNextNode.textContent = next.label || "Forward";
+  if (navNextNode) navNextNode.textContent = `${Math.round(nextGapHeight(player.height || 0))} ft`;
   document.querySelectorAll("[data-climb-button]").forEach((button) => {
     const turn = button.getAttribute("data-climb-button");
     button.disabled = (player.score || 0) < movementCostForTurn(turn);
@@ -846,10 +925,84 @@ function laneFromDirection(direction) {
   return Math.max(-1, Math.min(1, Math.sign(direction || 0)));
 }
 
+function obstacleHeight() {
+  return state.room?.obstacleHeight || 72;
+}
+
+function nextGapHeight(height = 0) {
+  const gap = obstacleHeight();
+  return (Math.floor(Math.max(0, height) / gap) + 1) * gap;
+}
+
+function platformEdgeLimit() {
+  return 3.45;
+}
+
+function clampCourseDirection(direction) {
+  return Math.max(-3.7, Math.min(3.7, Number(direction || 0)));
+}
+
+function isOffPlatform(player) {
+  return Math.abs(Number(player?.direction || 0)) > platformEdgeLimit();
+}
+
+function canClearPlatformGap(player, now) {
+  return climbMotion.jumpOffset > 0.18
+    || now - Number(player.lastJumpAt || 0) < 780
+    || climbMotion.jumpBufferUntil > now;
+}
+
+function resetPlayerPhysics(player) {
+  if (!player) return;
+  player.jumpOffset = 0;
+  player.coyoteUntil = 0;
+  player.pendingCoyoteStep = 0;
+  player.pendingCoyoteObstacle = null;
+  climbMotion.velocity = 0;
+  climbMotion.steerVelocity = 0;
+  climbMotion.verticalVelocity = 0;
+  climbMotion.jumpOffset = 0;
+  climbMotion.grounded = true;
+  climbMotion.lastGroundedAt = Date.now();
+  climbMotion.pointAccumulator = 0;
+}
+
+function fallLocalClimber(player, fromHeight = player?.height || 0) {
+  if (!player) return;
+  const checkpoint = Math.max(0, player.checkpointHeight || 0);
+  player.height = checkpoint;
+  player.direction = 0;
+  player.jumpArmedMoves = 0;
+  player.lastFallAt = Date.now();
+  player.falls = (player.falls || 0) + 1;
+  resetPlayerPhysics(player);
+  state.error = `Missed the obstacle timing and respawned at ${Math.round(checkpoint)} ft.`;
+  if (player.lastResult) {
+    player.lastResult = {
+      ...player.lastResult,
+      height: player.height,
+      direction: player.direction,
+      falls: player.falls || 0,
+      score: player.score || 0
+    };
+  }
+  scheduleClimbStateSync(40);
+}
+
+function expireCoyoteIfNeeded() {
+  const player = currentPlayer();
+  if (!player?.coyoteUntil || Date.now() <= player.coyoteUntil) return;
+  player.coyoteUntil = 0;
+  player.pendingCoyoteStep = 0;
+  player.pendingCoyoteObstacle = null;
+  climbMotion.velocity = Math.min(climbMotion.velocity, 0.2);
+  refreshClimbHud();
+}
+
 async function attemptClimb(turn) {
   if (state.role !== "player" || !state.room || state.room.status === "finished") return;
   if (state.view === "climb") {
-    queueClimbMove(turn, { flushSoon: true });
+    applyClimbButtonImpulse(turn);
     return;
   }
   if (climbSyncInFlight) return;
@@ -881,6 +1034,22 @@ async function attemptClimb(turn) {
   }
 }
 
+function applyClimbButtonImpulse(turn) {
+  const action = normalizedClimbTurn(turn);
+  if (action === "jump") {
+    climbMotion.jumpBufferUntil = Date.now() + 140;
+  } else if (action === "left") {
+    climbMotion.steerVelocity = Math.min(climbMotion.steerVelocity, -1.4);
+  } else if (action === "right") {
+    climbMotion.steerVelocity = Math.max(climbMotion.steerVelocity, 1.4);
+  } else if (action === "back") {
+    climbMotion.velocity = Math.min(climbMotion.velocity, -2.1);
+  } else {
+    climbMotion.velocity = Math.max(climbMotion.velocity, 4.4);
+  }
+  startClimbMovementLoop();
+}
+
 function applyLocalClimbMove(turn) {
   const player = currentPlayer();
   if (!player || state.role !== "player" || !state.room || state.room.status === "finished") return false;
@@ -900,19 +1069,20 @@ function applyLocalClimbMove(turn) {
   player.height ??= 0;
   player.direction ??= 0;
   player.jumpArmedMoves ??= 0;
+  player.checkpointHeight ??= Math.floor((player.height || 0) / obstacleHeight) * obstacleHeight;
 
   if (action === "left" || action === "right") {
     const laneStep = 0.28;
     player.direction = Math.max(-2, Math.min(2, player.direction + (action === "left" ? -laneStep : laneStep)));
   } else if (action === "back") {
     player.height = Math.max(0, (player.height || 0) - climbHeight);
+  } else if (action === "jump") {
+    player.lastJumpAt = Date.now();
+    player.jumpArmedMoves = 5;
+    player.coyoteUntil = 0;
   } else {
-    if (action === "jump") {
-      player.lastJumpAt = Date.now();
-      player.jumpArmedMoves = 5;
-    }
-    const jumpReady = action === "jump" || (player.jumpArmedMoves || 0) > 0;
-    if (action !== "jump" && player.jumpArmedMoves > 0) {
+    const jumpReady = (player.jumpArmedMoves || 0) > 0 || climbMotion.jumpBufferUntil > Date.now();
+    if (player.jumpArmedMoves > 0) {
       player.jumpArmedMoves = Math.max(0, player.jumpArmedMoves - 1);
     }
     const oldHeight = player.height || 0;
@@ -923,13 +1093,20 @@ function applyLocalClimbMove(turn) {
     if (newStep > oldStep) {
       const expectedLane = typeof player.nextObstacle?.turnValue === "number" ? player.nextObstacle.turnValue : 0;
       const currentLane = laneFromDirection(player.direction);
-      if (currentLane !== expectedLane || !jumpReady) {
-        player.height = 0;
+      if (currentLane !== expectedLane) {
+        player.height = player.checkpointHeight || 0;
         player.direction = 0;
         player.jumpArmedMoves = 0;
+        player.coyoteUntil = 0;
+        player.lastFallAt = Date.now();
         player.falls = (player.falls || 0) + 1;
+      } else if (!jumpReady) {
+        player.height = oldHeight;
+        player.coyoteUntil = Date.now() + 110;
       } else {
         player.jumpArmedMoves = 0;
+        player.coyoteUntil = 0;
+        player.checkpointHeight = newStep * obstacleHeight;
       }
     }
   }
@@ -941,6 +1118,7 @@ function applyLocalClimbMove(turn) {
       height: player.height,
       direction: player.direction,
       lastJumpAt: player.lastJumpAt,
+      lastFallAt: player.lastFallAt,
       falls: player.falls || 0
     };
   }
@@ -1000,6 +1178,64 @@ async function flushClimbMoves() {
   }
 }
 
+function climbStatePayload(player) {
+  return {
+    height: Math.max(0, Number(player.height || 0)),
+    direction: Math.max(-2, Math.min(2, Number(player.direction || 0))),
+    score: Math.max(0, Math.floor(Number(player.score || 0))),
+    falls: Number(player.falls || 0),
+    checkpointHeight: Math.max(0, Number(player.checkpointHeight || 0)),
+    jumpOffset: Math.max(0, Number(player.jumpOffset || 0)),
+    lastClimbAt: player.lastClimbAt || null,
+    lastJumpAt: player.lastJumpAt || null,
+    lastFallAt: player.lastFallAt || null
+  };
+}
+
+function scheduleClimbStateSync(delay = 140) {
+  climbStateDirty = true;
+  if (climbStateSyncTimer) return;
+  climbStateSyncTimer = setTimeout(() => {
+    climbStateSyncTimer = null;
+    flushClimbState();
+  }, delay);
+}
+
+async function flushClimbState() {
+  if (climbStateSyncInFlight) {
+    scheduleClimbStateSync(80);
+    return;
+  }
+  if (!climbStateDirty || !state.roomCode || !state.playerId) return;
+  if (climbStateSyncTimer) {
+    clearTimeout(climbStateSyncTimer);
+    climbStateSyncTimer = null;
+  }
+
+  const player = currentPlayer();
+  if (!player) return;
+  const snapshot = climbStatePayload(player);
+  climbStateDirty = false;
+  climbStateSyncInFlight = true;
+  try {
+    const reply = await api("/api/player/climb-state", {
+      roomCode: state.roomCode,
+      playerId: state.playerId,
+      snapshot
+    });
+    if (reply.ok && reply.room) {
+      const localClimber = state.view === "climb" ? currentPlayer() : null;
+      state.room = preserveLocalClimber(reply.room, localClimber);
+      state.error = "";
+    } else {
+      state.error = reply.error || "Climb sync paused. Keep answering questions if you run out of points.";
+    }
+  } finally {
+    climbStateSyncInFlight = false;
+    if (climbStateDirty) scheduleClimbStateSync(80);
+  }
+}
+
 function climbTurnFromKey(code) {
   const keyMap = {
     ArrowLeft: "left",
@@ -1034,36 +1270,222 @@ function currentHeldClimbTurn() {
   return forwardBack || side;
 }
 
-function startClimbMovementLoop() {
-  if (climbMoveTimer) return;
-  const tick = () => {
-    if (state.view !== "climb" || state.role !== "player" || !heldClimbKeys.size) {
-      stopClimbMovementLoop();
-      return;
-    }
-    const turn = currentHeldClimbTurn();
-    const now = Date.now();
-    if (turn && now - lastClimbInputAt >= 62) {
-      lastClimbInputAt = now;
-      queueClimbMove(turn);
-    }
-  };
-  tick();
-  climbMoveTimer = setInterval(tick, 24);
+function resetClimbMotion() {
+  Object.assign(climbMotion, {
+    velocity: 0,
+    steerVelocity: 0,
+    verticalVelocity: 0,
+    jumpOffset: 0,
+    grounded: true,
+    lastGroundedAt: Date.now(),
+    pointAccumulator: 0,
+    lastTime: 0,
+    lastHudAt: 0,
+    lastSceneAt: 0,
+    jumpBufferUntil: 0
+  });
 }
 
-function stopClimbMovementLoop() {
-  if (!climbMoveTimer) return;
-  clearInterval(climbMoveTimer);
-  climbMoveTimer = null;
+function approach(current, target, maxDelta) {
+  if (current < target) return Math.min(target, current + maxDelta);
+  return Math.max(target, current - maxDelta);
+}
+
+function climbMotionActive() {
+  return heldClimbKeys.size > 0
+    || Math.abs(climbMotion.velocity) > 0.03
+    || Math.abs(climbMotion.steerVelocity) > 0.03
+    || Math.abs(climbMotion.verticalVelocity) > 0.03
+    || climbMotion.jumpOffset > 0.001
+    || climbMotion.jumpBufferUntil > Date.now();
+}
+
+function spendMovementEnergy(player, amount) {
+  if (!player || amount <= 0) return true;
+  climbMotion.pointAccumulator += amount;
+  const wholePoints = Math.floor(climbMotion.pointAccumulator);
+  if (wholePoints <= 0) return true;
+
+  const available = Math.max(0, Number(player.score || 0));
+  const spent = Math.min(available, wholePoints);
+  player.score = Math.max(0, available - spent);
+  climbMotion.pointAccumulator -= spent;
+  if (spent < wholePoints || player.score <= 0) {
+    climbMotion.pointAccumulator = 0;
+    climbMotion.velocity = 0;
+    state.error = "Movement energy empty. Return to the quiz to earn more climb points.";
+    return false;
+  }
+  return true;
+}
+
+function beginBufferedJump(player, now) {
+  const withinCoyote = now - (climbMotion.lastGroundedAt || 0) <= 160 || (player.coyoteUntil && now <= player.coyoteUntil);
+  if (climbMotion.jumpBufferUntil < now || (!climbMotion.grounded && !withinCoyote)) return false;
+
+  climbMotion.verticalVelocity = 8.8;
+  climbMotion.grounded = false;
+  climbMotion.jumpBufferUntil = 0;
+  player.lastJumpAt = now;
+  player.jumpArmedMoves = 5;
+
+  if (player.coyoteUntil && player.pendingCoyoteStep) {
+    player.checkpointHeight = Math.max(player.checkpointHeight || 0, player.pendingCoyoteStep * (state.room?.obstacleHeight || 24));
+    player.coyoteUntil = 0;
+    player.pendingCoyoteStep = 0;
+    player.pendingCoyoteObstacle = null;
+  }
+  return true;
+}
+
+function updateJumpPhysics(player, dt, now) {
+  beginBufferedJump(player, now);
+
+  if (!climbMotion.grounded || climbMotion.jumpOffset > 0) {
+    climbMotion.verticalVelocity -= 17.2 * dt;
+    climbMotion.jumpOffset += climbMotion.verticalVelocity * dt;
+    if (climbMotion.jumpOffset <= 0) {
+      climbMotion.jumpOffset = 0;
+      climbMotion.verticalVelocity = 0;
+      climbMotion.grounded = true;
+      climbMotion.lastGroundedAt = now;
+    }
+  } else {
+    climbMotion.lastGroundedAt = now;
+  }
+
+  player.jumpOffset = climbMotion.jumpOffset;
+}
+
+function checkObstacleGate(player, oldHeight, now) {
+  const gapHeight = obstacleHeight();
+  const oldStep = Math.floor(Math.max(0, oldHeight) / gapHeight);
+  const newStep = Math.floor(Math.max(0, player.height || 0) / gapHeight);
+  if (newStep <= oldStep) return;
+
+  const gateHeight = newStep * gapHeight;
+  if (!canClearPlatformGap(player, now)) {
+    player.height = Math.max(0, gateHeight - 1.2);
+    player.coyoteUntil = now + 160;
+    player.pendingCoyoteStep = newStep;
+    player.pendingCoyoteObstacle = player.nextObstacle?.title || "platform gap";
+    climbMotion.velocity = Math.min(climbMotion.velocity, 0.7);
+    state.error = "Jump at the glowing platform gap to keep climbing.";
+    return;
+  }
+
+  player.checkpointHeight = Math.max(player.checkpointHeight || 0, gateHeight);
+  player.coyoteUntil = 0;
+  player.pendingCoyoteStep = 0;
+  player.pendingCoyoteObstacle = null;
+  player.jumpArmedMoves = 0;
+  state.error = "";
+}
+
+function checkPlatformEdges(player) {
+  if (!isOffPlatform(player)) return false;
+  state.error = "You slipped off the platform edge. Respawning at your last checkpoint.";
+  fallLocalClimber(player, player.height || 0);
+  return true;
+}
+
+function applyContinuousClimbMotion(player, dt, now) {
+  const forwardHeld = heldClimbKeys.has("KeyW") || heldClimbKeys.has("ArrowUp");
+  const backHeld = heldClimbKeys.has("KeyS") || heldClimbKeys.has("ArrowDown");
+  const leftHeld = heldClimbKeys.has("KeyA") || heldClimbKeys.has("ArrowLeft");
+  const rightHeld = heldClimbKeys.has("KeyD") || heldClimbKeys.has("ArrowRight");
+
+  const hasEnergy = (player.score || 0) > 0;
+  const targetVelocity = hasEnergy && forwardHeld ? 7.8 : hasEnergy && backHeld ? -3.4 : 0;
+  const targetSteer = leftHeld && !rightHeld ? -2.35 : rightHeld && !leftHeld ? 2.35 : 0;
+
+  climbMotion.velocity = approach(climbMotion.velocity, targetVelocity, (targetVelocity ? 11.5 : 6.6) * dt);
+  climbMotion.steerVelocity = approach(climbMotion.steerVelocity, targetSteer, (targetSteer ? 8.4 : 6.8) * dt);
+
+  const oldHeight = player.height || 0;
+  const heightDelta = hasEnergy ? climbMotion.velocity * dt : 0;
+  const steeringDelta = climbMotion.steerVelocity * dt;
+  const moving = Math.abs(heightDelta) > 0.001 || Math.abs(steeringDelta) > 0.001;
+  let fellOffEdge = false;
+
+  if (Math.abs(steeringDelta) > 0.001) {
+    player.direction = clampCourseDirection((player.direction || 0) + steeringDelta);
+    fellOffEdge = checkPlatformEdges(player);
+  }
+
+  if (Math.abs(heightDelta) > 0.001 && !fellOffEdge && !isOffPlatform(player)) {
+    const drainPerFoot = heightDelta > 0 ? 6.4 : 3.2;
+    const affordable = spendMovementEnergy(player, Math.abs(heightDelta) * drainPerFoot);
+    if (affordable) {
+      player.height = Math.max(0, oldHeight + heightDelta);
+      checkObstacleGate(player, oldHeight, now);
+    }
+  }
+
+  updateJumpPhysics(player, dt, now);
+
+  if (moving || Math.abs(climbMotion.verticalVelocity) > 0.001 || climbMotion.jumpOffset > 0.001) {
+    player.lastClimbAt = now;
+    if (player.lastResult) {
+      player.lastResult = {
+        ...player.lastResult,
+        score: player.score || 0,
+        height: player.height || 0,
+        direction: player.direction || 0,
+        lastJumpAt: player.lastJumpAt,
+        lastFallAt: player.lastFallAt,
+        falls: player.falls || 0
+      };
+    }
+    scheduleClimbStateSync(220);
+  }
+}
+
+function startClimbMovementLoop() {
+  if (climbFrameId) return;
+  const tick = (timestamp) => {
+    const player = currentPlayer();
+    if (state.view !== "climb" || state.role !== "player" || !player || !climbMotionActive()) {
+      stopClimbMovementLoop({ reset: false });
+      return;
+    }
+    const last = climbMotion.lastTime || timestamp;
+    const dt = Math.min(0.05, Math.max(0.001, (timestamp - last) / 1000));
+    climbMotion.lastTime = timestamp;
+
+    const now = Date.now();
+    expireCoyoteIfNeeded();
+    applyContinuousClimbMotion(player, dt, now);
+
+    if (timestamp - climbMotion.lastHudAt > 90) {
+      refreshClimbHud();
+      climbMotion.lastHudAt = timestamp;
+    }
+    if (timestamp - climbMotion.lastSceneAt > 33) {
+      mountInteractiveScenes();
+      climbMotion.lastSceneAt = timestamp;
+    }
+
+    climbFrameId = requestAnimationFrame(tick);
+  };
+  climbMotion.lastTime = 0;
+  climbFrameId = requestAnimationFrame(tick);
+}
+
+function stopClimbMovementLoop({ reset = false } = {}) {
+  if (!climbFrameId) return;
+  cancelAnimationFrame(climbFrameId);
+  climbFrameId = 0;
+  if (reset) resetClimbMotion();
   flushClimbMoves();
+  flushClimbState();
 }
 
 function render() {
   if (!state.deck) return;
   if (state.view !== "climb") {
     heldClimbKeys.clear();
-    stopClimbMovementLoop();
+    stopClimbMovementLoop({ reset: true });
   }
   const player = currentPlayer();
   if (state.view === "join") app.innerHTML = renderJoin();
@@ -1183,6 +1605,7 @@ app.addEventListener("click", async (event) => {
 
   if (action === "quiz-screen") {
     await flushClimbMoves();
+    await flushClimbState();
     if (state.role === "player" && state.room?.status === "answering") {
       const reply = await api("/api/player/mode", {
         roomCode: state.roomCode,
@@ -1252,7 +1675,10 @@ window.addEventListener("keydown", async (event) => {
   if (!turn) return;
   event.preventDefault();
   if (turn === "jump") {
-    if (!event.repeat) queueClimbMove("jump", { flushSoon: true });
+    if (!event.repeat) {
+      climbMotion.jumpBufferUntil = Date.now() + 140;
+      startClimbMovementLoop();
+    }
     return;
   }
   heldClimbKeys.add(event.code);
@@ -1262,12 +1688,12 @@ window.addEventListener("keydown", async (event) => {
 window.addEventListener("keyup", (event) => {
   if (!heldClimbKeys.has(event.code)) return;
   heldClimbKeys.delete(event.code);
-  if (heldClimbKeys.size === 0) stopClimbMovementLoop();
+  if (!climbMotionActive()) stopClimbMovementLoop();
 });
 
 window.addEventListener("blur", () => {
   heldClimbKeys.clear();
-  stopClimbMovementLoop();
+  stopClimbMovementLoop({ reset: true });
   flushClimbMoves();
 });
 
